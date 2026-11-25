@@ -1,12 +1,13 @@
 {
   "name": "mezzanotte",
-  "version": "1.0.0",
+  "version": "3.0.0",
   "private": true,
-  "description": "PWA MEZZANOTTE: sfida di 30 giorni (sonno entro mezzanotte + lettura)",
+  "description": "MEZZANOTTE: sistema di crescita personale (sonno entro mezzanotte + lettura), PWA per iPhone",
   "type": "module",
   "scripts": {
-    "test": "node --test tests/core.test.mjs",
+    "test": "node --test tests/core.test.mjs && TZ=America/Los_Angeles node --test tests/core.test.mjs && TZ=Pacific/Auckland node --test tests/core.test.mjs && TZ=Asia/Kolkata node --test tests/core.test.mjs",
     "test:e2e": "node tests/e2e.mjs",
+    "screenshots": "node tools/screenshots.mjs site screenshots",
     "serve": "python3 -m http.server 8080 --directory site",
     "icons": "node tools/make-icons.mjs && python3 tools/compress.py"
   }

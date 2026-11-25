@@ -233,17 +233,21 @@ function proposalCard(ctx, p) {
 }
 
 function welcomeBack(ctx) {
-  const { c, ui } = ctx;
+  const { ui } = ctx;
   if (!ui.away) return '';
+  const n = ui.away.days.length;
   return `<section class="welcome-back surface">
-    <div class="p-head"><span class="p-icon gold">${I.sunrise}</span><b>Bentornato</b></div>
-    <p>Quello che hai costruito è ancora qui: ${nf(c.xp.total)} XP, livello ${c.level.n} · ${esc(c.level.title)}. Riparti da oggi, oppure recupera ${ui.away.days.length === 1 ? 'il giorno' : `i ${ui.away.days.length} giorni`} non ${ui.away.days.length === 1 ? 'registrato' : 'registrati'}.</p>
+    <p>${n === 1 ? 'Un giorno non è stato registrato.' : `${n} giorni non sono stati registrati.`} Puoi recuperare quello che ricordi con certezza, oppure ripartire semplicemente da oggi.</p>
     <div class="p-actions"><button class="btn btn-small btn-ghost" data-action="away-dismiss">Riparti da oggi</button><button class="btn btn-small btn-primary" data-action="open-catchup">Recupera</button></div>
   </section>`;
 }
 
 export function viewToday(ctx) {
-  const { state, c, today, message } = ctx;
+  const { state, c, today, ui } = ctx;
+  // al rientro dopo qualche giorno il messaggio principale è un bentornato positivo
+  const message = ui.away
+    ? { tone: 'gold', icon: 'sunrise', text: `Bentornato. Quello che hai costruito è ancora qui: ${nf(c.xp.total)} XP e livello ${c.level.n}, ${c.level.title}.` }
+    : ctx.message;
   const j = c.journey;
   const eyebrow = cap(D.formatDateLong(today));
   let title;
@@ -263,10 +267,10 @@ export function viewToday(ctx) {
       ${bar('xp-today', c.level.progress, 'fill-gold')}
     </header>
     ${message ? `<p class="insight t-${message.tone}"><span>${icon(message.icon)}</span>${esc(message.text)}</p>` : ''}
-    ${welcomeBack(ctx)}${endCard}
+    ${endCard}
     <div class="section-head"><h2>Oggi</h2><span class="${doneToday.complete ? 'gold-txt' : ''}">${doneToday.complete ? `${I.check}Giornata completa` : `${doneToday.done} di ${doneToday.total}`}</span></div>
     <div class="habits">${habits.map((h) => habitCard(ctx, h)).join('')}</div>
-    ${prop}
+    ${welcomeBack(ctx)}${prop}
     ${weekCard(ctx)}`;
 }
 
@@ -287,7 +291,7 @@ function phaseRow(ctx, b) {
     }).join('')}<p class="ph-left">${b.daysLeft === 1 ? 'Ultimo giorno della fase' : `${b.daysLeft} giorni alla fine della fase`}</p>`
     : '';
   return `<li class="phase ${st}">${node}<div class="ph-body">
-    <div class="ph-top"><b>${b.phase <= 4 ? `Fase ${b.phase} · ` : ''}${p.name}</b><span>${D.formatDayMonth(b.from)} – ${D.formatDayMonth(b.to)}</span></div>
+    <div class="ph-top"><b>${b.phase <= 4 ? `Fase ${b.phase} · ` : ''}${p.name}</b><span>${D.formatRange(b.from, b.to)}</span></div>
     <div class="ph-goals">${goals}${st === 'done' ? '<span class="pg gold">Completata</span>' : ''}</div>${detail}</div></li>`;
 }
 
@@ -311,7 +315,7 @@ export function viewGoals(ctx) {
   const habits = E.visibleHabits(state, today);
   return `${header(`Percorso ${j.id}`, 'Obiettivi')}
     <section class="journey surface">
-      <div class="j-top"><div><div class="j-title">${statusTxt}</div><div class="muted small">${D.formatDayMonth(j.start)} – ${D.formatDayMonth(E.journeyEnd(j))}</div></div>
+      <div class="j-top"><div><div class="j-title">${statusTxt}</div><div class="muted small">${D.formatRange(j.start, E.journeyEnd(j))}</div></div>
         <div class="j-pct"><b>${Math.round((day / 30) * 100)}</b><small>%</small></div></div>
       ${bar('journey', day / 30, 'fill-gold')}
       ${ended ? `<button class="btn btn-primary" style="margin-top:16px" data-action="open-summary" data-journey="${j.id}">Il tuo bilancio</button>` : ''}
@@ -453,7 +457,7 @@ function overview(ctx) {
       <p class="foot">${readP.doneTotal} ${D.plural(readP.doneTotal, 'giornata', 'giornate')} con almeno ${c.read.goal} minuti · record ${c.read.bestDay} min.</p>
     </section>
     <div class="section-head"><h2>Risultati delle settimane</h2></div>
-    <div class="list">${weeks.map((b) => `<div class="list-item week-res"><span class="lbl">${blockLabel(b)}${b.timing === 'current' ? ' · in corso' : ''}<small>${D.formatDayMonth(b.from)} – ${D.formatDayMonth(b.to)} · ${Object.entries(b.habits).map(([hid, hp]) => `${hp.done}/${hp.target} ${unit(S.habitById(state, hid), hp.target)}`).join(' · ')}</small></span>
+    <div class="list">${weeks.map((b) => `<div class="list-item week-res"><span class="lbl">${blockLabel(b)}${b.timing === 'current' ? ' · in corso' : ''}<small>${D.formatRange(b.from, b.to)} · ${Object.entries(b.habits).map(([hid, hp]) => `${hp.done}/${hp.target} ${unit(S.habitById(state, hid), hp.target)}`).join(' · ')}</small></span>
       ${b.achieved ? `<span class="medal on">${I.check}</span>` : b.timing === 'current' ? '<span class="medal now"></span>' : '<span class="medal">–</span>'}</div>`).join('') || '<div class="list-item"><span class="lbl muted">Nessuna settimana ancora.</span></div>'}</div>
     ${sleepP ? '' : ''}`;
 }
@@ -790,7 +794,7 @@ export function sheetCatchup(ctx) {
 export function sheetSummary(ctx, sum) {
   const pctTxt = sum.consistency === null ? '—' : `${Math.round(sum.consistency * 100)}%`;
   const name = { sleep: 'A letto entro mezzanotte', read: 'Lettura quotidiana' };
-  return `${sheetHead(`Bilancio del percorso ${sum.journey.id}`, `${D.formatDayMonth(sum.from)} – ${D.formatDayMonth(sum.to)} · ${sum.days} giorni`)}
+  return `${sheetHead(`Bilancio del percorso ${sum.journey.id}`, `${D.formatRange(sum.from, sum.to)} · ${sum.days} giorni`)}
     <div class="sum-hero"><div class="sum-ring"><svg viewBox="0 0 132 132" width="132" height="132">${ring('sum', 132, 10, sum.consistency || 0, 'grad-mix')}</svg><div class="center"><b>${pctTxt}</b><span>costanza</span></div></div></div>
     <div class="tiles">
       <div class="tile"><div class="k">Notti in orario</div><div class="v c-sleep-t">${sum.nights}<small>/ ${sum.nightsEligible}</small></div></div>

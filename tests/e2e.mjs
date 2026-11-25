@@ -394,10 +394,15 @@ try {
     await p4.clock.install({ time: new Date('2026-12-02T09:00:00+01:00') });
     await p4.goto(BASE);
     await p4.waitForSelector('#view-today.active .welcome-back');
-    const txt = await p4.textContent('#view-today .welcome-back');
+    const txt = await p4.textContent('#view-today .insight');
     assert.match(txt, /Bentornato/);
     assert.match(txt, /XP/);
-    assert.doesNotMatch(txt, /perso|fallit|peccato/i);
+    const all = await p4.textContent('#view-today');
+    assert.doesNotMatch(all, /perso|fallit|peccato|purtroppo/i);
+    // le abitudini restano visibili senza scorrere anche al rientro
+    const tabTop = await p4.evaluate(() => document.querySelector('.tabbar').getBoundingClientRect().top);
+    const box = await p4.locator('#view-today [data-card="read"] .check').boundingBox();
+    assert.ok(box.y + box.height < tabTop);
     await shot('10-bentornato', p4);
     await p4.click('[data-action="open-catchup"]');
     await p4.waitForSelector('.sheet.show .cu-row');
@@ -407,6 +412,50 @@ try {
     await p4.waitForSelector('.sheet', { state: 'detached' });
     assert.equal(await p4.locator('#view-today .welcome-back').count(), 0);
     await p4.close();
+  });
+
+  await step('fine del percorso: bilancio, nuovo percorso senza perdere lo storico, nuova abitudine', async () => {
+    const p7 = await ctx.newPage();
+    watch(p7);
+    await p7.clock.install({ time: new Date('2026-12-23T19:00:00+01:00') });
+    await p7.goto(BASE);
+    // eventuali celebrazioni prima del bilancio
+    for (let i = 0; i < 6 && !(await p7.locator('.sheet.show[data-type="summary"]').count()); i++) {
+      if (await p7.locator('.overlay.show [data-action="ov-close"]').count()) await p7.click('.overlay.show [data-action="ov-close"]');
+      await p7.waitForTimeout(700);
+    }
+    await p7.waitForSelector('.sheet.show[data-type="summary"]');
+    const sum = await p7.textContent('.sheet');
+    assert.match(sum, /Bilancio del percorso 1/);
+    assert.match(sum, /Notti in orario/);
+    assert.match(sum, /Minuti di lettura/);
+    assert.match(sum, /Prossimo percorso/);
+    await shot('13-bilancio', p7);
+    const before = await M(p7);
+    await p7.click('.sheet [data-action="start-next"]');
+    await p7.waitForSelector('.dialog-wrap.show');
+    await p7.click('.dialog-wrap .actions button.strong');
+    await p7.waitForFunction(() => window.__mezzanotte.state.journeys.length === 2);
+    const after = await M(p7);
+    assert.equal(after.state.journeys[1].start, '2026-12-23');
+    assert.deepEqual(after.state.entries, before.state.entries);
+    assert.ok(after.xp.total >= before.xp.total);
+    assert.match(await p7.textContent('#view-today .large-title'), /Giorno 1/);
+    // nuova abitudine, ora sbloccata
+    await p7.click('.tab[data-tab="goals"]');
+    await p7.click('#view-goals [data-action="new-habit"]');
+    await p7.waitForSelector('.sheet.show #nh-name');
+    await p7.fill('#nh-name', 'Allenamento');
+    await p7.click('.sheet [data-action="draft-step"][data-k="perWeek"][data-val="-1"]');
+    await p7.click('.sheet [data-action="create-habit"]');
+    await p7.waitForFunction(() => window.__mezzanotte.state.habits.length === 3);
+    const h = (await M(p7)).state.habits[2];
+    assert.equal(h.id, 'allenamento');
+    assert.equal(h.config.perWeek, 3);
+    await p7.click('.tab[data-tab="today"]');
+    await p7.click('#view-today [data-card="allenamento"] .check');
+    await p7.waitForFunction(() => window.__mezzanotte.state.entries.allenamento['2026-12-23']?.done === true);
+    await p7.close();
   });
 
   await step('passaggio di livello: schermata speciale, chiudibile subito', async () => {

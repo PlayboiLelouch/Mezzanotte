@@ -22,8 +22,14 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: Test della logica
+      - name: Test della logica (più fusi orari)
         run: npm test
+      - name: Installa Chromium per i test end-to-end
+        run: |
+          npm install --no-save playwright@1.63.0
+          npx playwright install --with-deps chromium
+      - name: Test end-to-end (emulazione iPhone, aggiornamento 1.0 → 3.0, offline)
+        run: npm run test:e2e
 
   deploy:
     needs: test

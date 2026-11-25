@@ -86,6 +86,15 @@ export function formatDayMonth(iso) {
   return `${d.getDate()} ${MONTHS_SHORT[d.getMonth()]}`;
 }
 
+// Intervallo compatto: "22–28 nov" oppure "29 nov – 5 dic".
+export function formatRange(from, to) {
+  const a = parseISO(from);
+  const b = parseISO(to);
+  if (from === to) return formatDayMonth(from);
+  if (a.getMonth() === b.getMonth() && a.getFullYear() === b.getFullYear()) return `${a.getDate()}–${b.getDate()} ${MONTHS_SHORT[b.getMonth()]}`;
+  return `${formatDayMonth(from)} – ${formatDayMonth(to)}`;
+}
+
 export function monthLabel(year, month) {
   return `${MONTHS_LONG[month]} ${year}`;
 }

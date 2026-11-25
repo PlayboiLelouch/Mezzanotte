@@ -109,6 +109,7 @@ svg { display: block; }
 .section-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin: 24px 4px 10px; }
 .section-head h2 { margin: 0; font-size: 13px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-3); }
 .section-head > span { font-size: 13px; font-weight: 600; color: var(--text-2); }
+.section-head > span.gold-txt { color: var(--gold); }
 .link { color: var(--sleep); font-size: 14px; font-weight: 600; }
 
 /* ---------- Barre e anelli ---------- */
@@ -233,12 +234,13 @@ i.dot-sleep { background: var(--sleep); } i.dot-read { background: var(--read); 
 .wk-goal .bar { grid-column: 1 / -1; }
 
 .proposal, .welcome-back { margin-top: 12px; border-color: rgba(171, 159, 255, 0.22); background: linear-gradient(160deg, rgba(122, 104, 238, 0.12), transparent 60%), var(--surface); }
-.welcome-back { margin-top: 16px; border-color: rgba(233, 196, 126, 0.22); background: linear-gradient(160deg, rgba(233, 196, 126, 0.1), transparent 60%), var(--surface); }
+.welcome-back { margin-top: 12px; border-color: rgba(233, 196, 126, 0.22); background: linear-gradient(160deg, rgba(233, 196, 126, 0.1), transparent 60%), var(--surface); }
 .p-head { display: flex; align-items: center; gap: 10px; font-size: 16px; }
 .p-icon { flex: none; width: 32px; height: 32px; border-radius: 10px; display: grid; place-items: center; background: var(--sleep-soft); color: var(--sleep); }
 .p-icon.gold { background: var(--gold-soft); color: var(--gold); }
 .p-icon svg { width: 18px; height: 18px; }
 .proposal p, .welcome-back p { font-size: 14.5px; color: var(--text-2); line-height: 1.45; margin: 10px 0 14px; }
+.welcome-back p { margin-top: 0; }
 .p-actions { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; }
 .end-card { display: flex; align-items: center; gap: 12px; margin-top: 16px; text-align: left; border-color: rgba(233, 196, 126, 0.25); }
 .end-card > span:nth-child(2) { flex: 1; display: flex; flex-direction: column; }
@@ -264,9 +266,9 @@ i.dot-sleep { background: var(--sleep); } i.dot-read { background: var(--read); 
 .node.current i { width: 10px; height: 10px; border-radius: 50%; background: var(--sleep); }
 .node.closed { background: var(--surface-3); border-color: transparent; }
 .ph-body { min-width: 0; padding-top: 2px; }
-.ph-top { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; }
+.ph-top { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 2px 8px; align-items: baseline; }
 .ph-top b { font-size: 16px; }
-.ph-top span { font-size: 13px; color: var(--text-3); white-space: nowrap; }
+.ph-top span { font-size: 13px; color: var(--text-3); white-space: nowrap; margin-left: auto; }
 .phase.next .ph-top b { color: var(--text-2); }
 .ph-goals { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 7px; }
 .ph-goals.center { justify-content: center; }
@@ -344,9 +346,10 @@ button.list-item:active { background: rgba(255, 255, 255, 0.04); }
 
 .tiles { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 12px; }
 .tiles.three { grid-template-columns: repeat(3, 1fr); }
-.tile { background: var(--surface); border: 1px solid var(--line); border-radius: 18px; padding: 13px 13px 12px; min-width: 0; }
+.tile { background: var(--surface); border: 1px solid var(--line); border-radius: 18px; padding: 13px 13px 12px; min-width: 0; overflow: hidden; }
 .tile .k { display: flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 700; color: var(--text-3); text-transform: uppercase; letter-spacing: 0.04em; }
-.tile .k span { display: grid; }
+.tile .k span { display: grid; flex: none; }
+.tile .k span svg { margin: 0; }
 .tile .k svg { width: 13px; height: 13px; }
 .tile .v { font-family: var(--font-round); font-size: 26px; font-weight: 800; letter-spacing: -0.02em; margin-top: 5px; font-variant-numeric: tabular-nums; line-height: 1.1; }
 .tile .v small { font-size: 13px; color: var(--text-2); font-weight: 600; margin-left: 3px; letter-spacing: 0; }
@@ -682,6 +685,8 @@ button.list-item:active { background: rgba(255, 255, 255, 0.04); }
   .large-title { font-size: 28px; }
   .h-actions { margin-left: 0; }
   .tiles.three .tile .v { font-size: 22px; }
+  .tiles.three .tile { padding: 12px 10px; }
+  .tile .k { font-size: 11px; letter-spacing: 0.02em; }
 }
 
 .reduce-motion *, .reduce-motion *::before, .reduce-motion *::after { animation-duration: 0.01ms !important; animation-delay: 0ms !important; transition-duration: 0.01ms !important; }

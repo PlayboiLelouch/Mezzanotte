@@ -262,7 +262,7 @@ function nextOverlay() {
     wrap.classList.remove('show');
     setTimeout(() => wrap.remove(), 260);
     overlayOpen = false;
-    setTimeout(nextOverlay, 120);
+    setTimeout(() => { nextOverlay(); nextAchToast(); }, 160);
   };
   wrap.addEventListener('click', (e) => {
     if (e.target === wrap || e.target.closest('[data-action="ov-close"]')) close();
@@ -270,7 +270,7 @@ function nextOverlay() {
 }
 
 function nextAchToast() {
-  if (achToastOpen || !toastQueue.length) return;
+  if (achToastOpen || overlayOpen || !toastQueue.length) return;
   const a = toastQueue.shift();
   achToastOpen = true;
   const el = document.createElement('button');

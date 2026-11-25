@@ -445,3 +445,9 @@ test('messaggi contestuali basati sui progressi reali', () => {
   // ordine stabile nello stesso giorno
   assert.deepEqual(M.buildMessages(s, c, new Date(2026, 10, 26, 18, 0)).map((m) => m.id), ids);
 });
+
+test('intervalli di date compatti', () => {
+  assert.equal(D.formatRange('2026-11-22', '2026-11-28'), '22–28 nov');
+  assert.equal(D.formatRange('2026-11-29', '2026-12-05'), '29 nov – 5 dic');
+  assert.equal(D.formatRange('2026-12-30', '2027-01-05'), '30 dic – 5 gen');
+});
