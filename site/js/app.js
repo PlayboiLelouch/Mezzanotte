@@ -1,38 +1,22 @@
-// MEZZANOTTE — interfaccia
-import * as C from './core.js';
+// MEZZANOTTE 3 — applicazione: persistenza sicura, azioni, rendering, celebrazioni.
+import * as D from './core.js';
+import * as S from './store.js';
+import * as E from './engine.js';
+import * as M from './messages.js';
+import * as V from './views.js';
+import * as FX from './fx.js';
+import { I } from './icons.js';
 
-const VERSION = '1.0.0';
-const STORAGE_KEY = 'mezzanotte:v1';
+const VERSION = '3.0.0';
 const TIMER_KEY = 'mezzanotte:timer';
-const HINT_KEY = 'mezzanotte:hide-install-hint';
+const KEY_BEFORE_RESET = 'mezzanotte:backup-prima-del-reset';
 
 const $ = (sel, root = document) => root.querySelector(sel);
-const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
-const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
-const plural = (n, one, many) => (n === 1 ? one : many);
+const isStandalone = () => window.navigator.standalone === true || window.matchMedia('(display-mode: standalone)').matches;
+const isIOS = () => /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+const systemReduce = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
-// ---------- Icone (stile SF Symbols) ----------
-const I = {
-  moon: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M20.3 14.6A8.6 8.6 0 0 1 9.4 3.7a.7.7 0 0 0-.9-.9A9.9 9.9 0 1 0 21.2 15.5a.7.7 0 0 0-.9-.9Z"/></svg>',
-  book: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 6.5C10.3 5 7.9 4.3 4 4.5v13c3.9-.2 6.3.5 8 2 1.7-1.5 4.1-2.2 8-2v-13c-3.9-.2-6.3.5-8 2Z"/><path d="M12 6.5v13"/></svg>',
-  today: '<svg viewBox="0 0 28 28" fill="none" stroke="currentColor" stroke-width="2"><circle cx="14" cy="14" r="10.5"/><path d="M14 8v6l4 2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>',
-  cal: '<svg viewBox="0 0 28 28" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="4" y="5.5" width="20" height="18" rx="4.5"/><path d="M4 11h20M9.5 3.5v4M18.5 3.5v4"/><circle cx="10" cy="16" r="1.2" fill="currentColor" stroke="none"/><circle cx="14" cy="16" r="1.2" fill="currentColor" stroke="none"/><circle cx="18" cy="16" r="1.2" fill="currentColor" stroke="none"/></svg>',
-  chart: '<svg viewBox="0 0 28 28" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 22V14M11.3 22V7M16.6 22v-10M22 22V4"/></svg>',
-  gear: '<svg viewBox="0 0 28 28" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3.5l2 2.6 3.2-.6.9 3.1 3 1.4-.9 3.1 1.9 2.6-2.6 2 .1 3.2-3.2.4-1.4 2.9-3-1.2-3 1.2-1.4-2.9-3.2-.4.1-3.2-2.6-2 1.9-2.6-.9-3.1 3-1.4.9-3.1 3.2.6Z"/><circle cx="14" cy="14" r="3.6"/></svg>',
-  check: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>',
-  x: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>',
-  plus: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>',
-  minus: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M5 12h14"/></svg>',
-  chev: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5l7 7-7 7"/></svg>',
-  share: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12M7.5 7.5L12 3l4.5 4.5"/><path d="M6 11H5a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-8a1 1 0 0 0-1-1h-1"/></svg>',
-  play: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5.5v13a1 1 0 0 0 1.5.9l10-6.5a1 1 0 0 0 0-1.8l-10-6.5A1 1 0 0 0 8 5.5Z"/></svg>',
-  stop: '<svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2.5"/></svg>',
-  flame: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2.5c.4 3-1.6 4.8-3.2 6.6C7.3 10.8 6 12.5 6 15a6 6 0 0 0 12 0c0-2.2-1-4.1-2.3-5.4-.2 1.4-.9 2.5-2 3 .4-3.3-.5-7.4-1.7-10.1Z"/></svg>',
-  star: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 3l2.6 5.6 6.1.7-4.5 4.2 1.2 6L12 16.6 6.6 19.5l1.2-6L3.3 9.3l6.1-.7Z"/></svg>',
-  download: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v11M7.5 10.5L12 15l4.5-4.5M5 20h14"/></svg>',
-};
-
-// ---------- Persistenza ----------
+// ---------- Persistenza: localStorage + copia in IndexedDB ----------
 const idb = {
   open() {
     return new Promise((res, rej) => {
@@ -72,44 +56,61 @@ const idb = {
   },
 };
 
-function readLocal() {
+const lsGet = (k) => { try { return localStorage.getItem(k); } catch { return null; } };
+const lsSet = (k, v) => { try { localStorage.setItem(k, v); return true; } catch { return false; } };
+
+async function keepCopy(key, raw) {
+  if (!raw || lsGet(key)) return;
+  lsSet(key, raw);
+  await idb.set(key, raw);
+}
+
+// Ordine di caricamento: formato 2 → copia in IndexedDB → formato 1 (migrazione). Nulla viene cancellato.
+async function loadState() {
+  const tryParse = (raw) => { try { return S.migrate(JSON.parse(raw)); } catch { return null; } };
+  let s = null;
+  let source = 'new';
+  const v2 = lsGet(S.KEY_V2) || (await idb.get(S.KEY_V2));
+  if (v2) { s = tryParse(v2); if (s) source = 'v2'; }
+  const v1 = lsGet(S.KEY_V1) || (await idb.get(S.KEY_V1));
+  if (!s && v1) {
+    s = tryParse(v1);
+    if (s) {
+      source = 'v1';
+      await keepCopy(S.KEY_PRE_MIGRATION, v1); // punto di ripristino dei dati originali
+    }
+  }
+  if (s && source === 'v2' && v1) {
+    try {
+      const r = S.mergeNewerV1(s, JSON.parse(v1));
+      if (r.merged) s = r.state;
+    } catch { /* copia 1.x non leggibile: ignorata */ }
+  }
+  return { s: s || S.createState(), source };
+}
+
+let saveFailed = false;
+function save() {
+  state = S.setMeta(state, { v1MirrorAt: state.updatedAt });
+  const json = JSON.stringify(state);
+  const v1 = JSON.stringify(S.toV1(state));
+  const ok = lsSet(S.KEY_V2, json) && lsSet(S.KEY_V1, v1);
+  if (!ok && !saveFailed) toast('Spazio di archiviazione pieno: esporta un backup', I.info);
+  saveFailed = !ok;
+  idb.set(S.KEY_V2, json);
+  idb.set(S.KEY_V1, v1);
+}
+
+// ---------- Timer di lettura (sopravvive alla chiusura dell'app) ----------
+function getTimer() {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    return raw ? C.validateState(JSON.parse(raw)) : null;
+    const t = JSON.parse(lsGet(TIMER_KEY) || 'null');
+    if (!t || !D.isValidISO(t.iso)) return null;
+    if ('startedAt' in t && !('acc' in t)) return { habit: 'read', iso: t.iso, acc: 0, since: t.startedAt }; // formato 1.x
+    return { habit: 'read', iso: t.iso, acc: Number(t.acc) || 0, since: t.since ? Number(t.since) : null };
   } catch {
     return null;
   }
-}
-
-async function loadState() {
-  let s = readLocal();
-  if (!s) {
-    const backup = await idb.get(STORAGE_KEY);
-    if (backup) {
-      try { s = C.validateState(JSON.parse(backup)); } catch { s = null; }
-    }
-  }
-  return s || C.createState(null);
-}
-
-function save() {
-  const json = JSON.stringify(state);
-  try { localStorage.setItem(STORAGE_KEY, json); } catch { toast('Spazio di archiviazione pieno'); }
-  idb.set(STORAGE_KEY, json);
-}
-
-// ---------- Stato UI ----------
-let state = C.createState(null);
-let tab = 'today';
-let today = C.logicalToday();
-let sheetIso = null;
-const animMemory = new Map();
-
-const isStandalone = () => window.navigator.standalone === true || window.matchMedia('(display-mode: standalone)').matches;
-const isIOS = () => /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
-
-function getTimer() {
-  try { return JSON.parse(localStorage.getItem(TIMER_KEY) || 'null'); } catch { return null; }
 }
 function setTimer(t) {
   try {
@@ -117,42 +118,226 @@ function setTimer(t) {
     else localStorage.removeItem(TIMER_KEY);
   } catch { /* ignora */ }
 }
+const timerElapsed = (t) => (t ? t.acc + (t.since ? Date.now() - t.since : 0) : 0);
 
-function update(iso, patch, sourceEl) {
-  const before = state.start ? C.computeStats(state, today) : null;
-  const prevInfo = C.dayInfo(state, iso, today);
-  state = C.setEntry(state, iso, patch);
+// ---------- Stato ----------
+let state = S.createState();
+let today = D.logicalToday();
+let c = null;
+const ui = {
+  tab: 'today',
+  progressTab: 'overview',
+  calMonth: { y: new Date().getFullYear(), m: new Date().getMonth() },
+  sheet: null,
+  historyLimit: 45,
+  away: null,
+  draft: null,
+  lastXp: null,
+  pop: null,
+  timerGoalNotified: false,
+};
+
+function compute() {
+  c = E.compute(state, today);
+  return c;
+}
+
+function ctx() {
+  const now = new Date();
+  return {
+    state, c, today, now, ui, timer: getTimer(),
+    proposals: c ? E.proposals(state, c) : [],
+    message: c && state.journeys.length ? M.topMessage(state, c, now) : null,
+    standalone: isStandalone(), ios: isIOS(),
+    swReady: 'serviceWorker' in navigator && !!navigator.serviceWorker.controller,
+    version: VERSION,
+    hapticNote: FX.hapticSupported() ? (isIOS() ? 'Su iPhone richiede iOS 18 o successivo' : 'Vibrazione breve dove supportata') : 'Non supportato da questo dispositivo',
+    systemReduce: systemReduce(),
+  };
+}
+
+// ---------- Modifiche con feedback ----------
+function commit(next, fb = null) {
+  const prev = c;
+  const prevState = state;
+  state = next;
   save();
-  const info = C.dayInfo(state, iso, today);
-  if (sourceEl) {
-    if (info.read === 'done' && prevInfo.read !== 'done') burst(sourceEl, '#34d399');
-    if (info.sleep === 'done' && prevInfo.sleep !== 'done') burst(sourceEl, '#a78bfa');
-  }
-  if (before) {
-    const after = C.computeStats(state, today);
-    after.blocks.forEach((b, i) => {
-      if (b.achieved && !before.blocks[i].achieved) toast(`${b.label}: obiettivo raggiunto!`, I.star);
-    });
-  }
+  compute();
+  if (fb) feedback(prevState, prev, fb);
   render();
+  celebrate();
 }
 
-// ---------- Componenti ----------
-function ring(id, size, stroke, pct, color) {
-  const r = (size - stroke) / 2;
-  const c = 2 * Math.PI * r;
-  const to = c * (1 - Math.min(1, Math.max(0, pct)));
-  const from = animMemory.has(id) ? animMemory.get(id) : c;
-  return `<circle class="ring-track" cx="${size / 2}" cy="${size / 2}" r="${r}" fill="none" stroke-width="${stroke}"/>
-    <circle class="ring-bar" data-anim="${id}" data-to="${to}" cx="${size / 2}" cy="${size / 2}" r="${r}" fill="none"
-      stroke="${color}" stroke-width="${stroke}" stroke-dasharray="${c}" style="stroke-dashoffset:${from}"
-      transform="rotate(-90 ${size / 2} ${size / 2})"/>`;
+function feedback(prevState, prev, { el, habit, iso }) {
+  if (!habit || !iso) return;
+  const h = S.habitById(state, habit);
+  const before = E.status(prevState, h, iso, today);
+  const after = E.status(state, h, iso, today);
+  if (before !== 'done' && after === 'done') {
+    const dayBefore = E.dayInfo(prevState, iso, today).complete;
+    const dayAfter = E.dayInfo(state, iso, today).complete;
+    const gained = c.xp.total - prev.xp.total;
+    ui.pop = `${habit}:${iso}`;
+    if (dayAfter && !dayBefore) {
+      FX.haptic('success');
+      FX.sound('full');
+      requestAnimationFrame(() => {
+        const target = document.querySelector(`[data-action="habit-check"][data-habit="${habit}"][data-iso="${iso}"]`) || el;
+        FX.burst(target);
+      });
+    } else {
+      FX.haptic('light');
+      FX.sound('done');
+    }
+    if (gained > 0) FX.floatText(el, `+${gained} XP`, `t-${h.color}`);
+  } else if (before !== after) {
+    FX.haptic('light');
+  }
 }
 
-function bar(id, pct, color) {
-  const to = Math.round(Math.min(1, Math.max(0, pct)) * 1000) / 10;
-  const from = animMemory.has(id) ? animMemory.get(id) : 0;
-  return `<div class="bar"><i class="${color}" data-anim="${id}" data-to="${to}" data-kind="width" style="width:${from}%"></i></div>`;
+// ---------- Celebrazioni (traguardi, livelli, fasi) ----------
+const overlayQueue = [];
+let overlayOpen = false;
+const toastQueue = [];
+let achToastOpen = false;
+
+function markAllSeen() {
+  compute();
+  state = S.setMeta(state, {
+    seen: {
+      achievements: c.achievements.filter((a) => a.unlocked).map((a) => a.id),
+      level: Math.max(state.meta.seen.level, c.level.n),
+      phases: c.blocks.filter((b) => b.phase && b.achieved && b.timing !== 'future').map((b) => b.key),
+    },
+  });
+}
+
+function celebrate() {
+  if (!state.journeys.length || !state.meta.seen.welcome) return;
+  const seen = state.meta.seen;
+  const phases = c.blocks.filter((b) => b.phase && b.achieved && b.timing !== 'future' && !seen.phases.includes(b.key));
+  const achs = c.achievements.filter((a) => a.unlocked && !seen.achievements.includes(a.id));
+  const levelUp = c.level.n > seen.level ? c.level.n : null;
+  const j = c.journey;
+  const summary = j && c.journeyState === 'completed' && !seen.summaries.includes(String(j.id));
+  if (!phases.length && !achs.length && !levelUp && !summary) return;
+  state = S.setMeta(state, {
+    seen: {
+      phases: [...seen.phases, ...phases.map((b) => b.key)],
+      achievements: [...seen.achievements, ...achs.map((a) => a.id)],
+      level: Math.max(seen.level, c.level.n),
+      summaries: summary ? [...seen.summaries, String(j.id)] : seen.summaries,
+    },
+  });
+  save();
+  for (const b of phases) overlayQueue.push({ cls: 'ov-phase-wrap', html: V.overlayPhase(state, b), fx: 'full' });
+  if (levelUp) overlayQueue.push({ cls: 'ov-level-wrap', html: V.overlayLevel(c, levelUp), fx: 'level' });
+  for (const a of achs) toastQueue.push(a);
+  if (summary) overlayQueue.push({ sheet: { type: 'summary', journey: j.id } });
+  nextOverlay();
+  nextAchToast();
+}
+
+function nextOverlay() {
+  // le celebrazioni a schermo intero non interrompono una scheda aperta: compaiono alla chiusura
+  if (overlayOpen || !overlayQueue.length || ui.sheet) return;
+  const item = overlayQueue.shift();
+  if (item.sheet) {
+    openSheet(item.sheet);
+    return;
+  }
+  overlayOpen = true;
+  const wrap = document.createElement('div');
+  wrap.className = `overlay ${item.cls || ''}`;
+  wrap.setAttribute('role', 'dialog');
+  wrap.setAttribute('aria-modal', 'true');
+  wrap.innerHTML = item.html;
+  document.body.appendChild(wrap);
+  requestAnimationFrame(() => wrap.classList.add('show'));
+  if (item.fx) {
+    FX.haptic('success');
+    FX.sound(item.fx);
+  }
+  const close = () => {
+    wrap.classList.remove('show');
+    setTimeout(() => wrap.remove(), 260);
+    overlayOpen = false;
+    setTimeout(nextOverlay, 120);
+  };
+  wrap.addEventListener('click', (e) => {
+    if (e.target === wrap || e.target.closest('[data-action="ov-close"]')) close();
+  });
+}
+
+function nextAchToast() {
+  if (achToastOpen || !toastQueue.length) return;
+  const a = toastQueue.shift();
+  achToastOpen = true;
+  const el = document.createElement('button');
+  el.className = 'ach-toast';
+  el.setAttribute('role', 'status');
+  el.dataset.action = 'open-achievement';
+  el.dataset.id = a.id;
+  el.innerHTML = V.achievementToast(a);
+  document.body.appendChild(el);
+  requestAnimationFrame(() => el.classList.add('show'));
+  FX.haptic('success');
+  FX.sound('level');
+  setTimeout(() => {
+    el.classList.remove('show');
+    setTimeout(() => { el.remove(); achToastOpen = false; nextAchToast(); }, 400);
+  }, 3400);
+}
+
+// ---------- Rendering ----------
+const TABS = [
+  { id: 'today', label: 'Oggi', icon: I.today, view: V.viewToday },
+  { id: 'goals', label: 'Obiettivi', icon: I.target, view: V.viewGoals },
+  { id: 'progress', label: 'Progressi', icon: I.chart, view: V.viewProgress },
+  { id: 'profile', label: 'Profilo', icon: I.person, view: V.viewProfile },
+];
+
+function shell() {
+  $('#app').innerHTML = `${TABS.map((t) => `<section class="view" id="view-${t.id}" aria-label="${t.label}"><div class="view-inner"></div></section>`).join('')}
+    <nav class="tabbar" role="tablist">${TABS.map((t) => `<button class="tab" role="tab" data-action="goto" data-tab="${t.id}" aria-label="${t.label}">${t.icon}<span>${t.label}</span></button>`).join('')}</nav>`;
+}
+
+function render() {
+  if (!state.journeys.length) {
+    $('#app').classList.add('hidden');
+    if (!$('#onboarding')) document.body.insertAdjacentHTML('beforeend', V.onboarding(ctx()));
+    return;
+  }
+  $('#app').classList.remove('hidden');
+  if (!c) compute();
+  const x = ctx();
+  for (const t of TABS) {
+    const view = $(`#view-${t.id}`);
+    const on = t.id === ui.tab;
+    view.classList.toggle('active', on);
+    view.setAttribute('aria-hidden', String(!on));
+    if (on) $('.view-inner', view).innerHTML = t.view(x);
+  }
+  document.querySelectorAll('.tab').forEach((b) => {
+    const on = b.dataset.tab === ui.tab;
+    b.classList.toggle('active', on);
+    b.setAttribute('aria-selected', on);
+  });
+  if (ui.sheet) renderSheet();
+  runAnimations();
+  afterRender();
+  tick();
+}
+
+function afterRender() {
+  const xpEl = document.querySelector('#view-today.active [data-xp]');
+  if (xpEl && ui.lastXp !== null && ui.lastXp !== c.xp.total) FX.countUp(xpEl, ui.lastXp, c.xp.total, V.nf);
+  ui.lastXp = c.xp.total;
+  if (ui.pop) {
+    const [habit, iso] = ui.pop.split(':');
+    document.querySelectorAll(`[data-action="habit-check"][data-habit="${habit}"][data-iso="${iso}"]`).forEach((b) => b.classList.add('pop'));
+    ui.pop = null;
+  }
 }
 
 function runAnimations(root = document) {
@@ -163,470 +348,92 @@ function runAnimations(root = document) {
       const to = Number(el.dataset.to);
       if (el.dataset.kind === 'width') el.style.width = `${to}%`;
       else el.style.strokeDashoffset = to;
-      animMemory.set(el.dataset.anim, to);
+      V.animMemory.set(el.dataset.anim, to);
     });
   }));
 }
 
-function pill(status, kind) {
-  const map = {
-    done: kind === 'sleep' ? ['done violet', 'Fatto'] : ['done', 'Fatto'],
-    missed: ['missed', 'Mancato'],
-    pending: ['pending', 'Da fare'],
-    free: ['free', 'Libero'],
-    future: ['pending', 'In arrivo'],
-  };
-  const [cls, label] = map[status];
-  return `<span class="status-pill ${cls}">${label}</span>`;
-}
-
-function sleepCard(iso, { title }) {
-  const info = C.dayInfo(state, iso, today);
-  const e = state.days[iso] || {};
-  const yes = e.sleep === true;
-  const no = e.sleep === false;
-  const freeNote = info.saturday
-    ? `<div class="note-free">Sabato sera libero: questa notte non conta per la sfida. Puoi comunque annotare l'orario.</div>`
-    : '';
-  return `<section class="card" data-card="sleep">
-    <div class="card-title"><span class="icon-badge violet">${I.moon}</span>${title}${pill(info.sleep, 'sleep')}</div>
-    ${freeNote}
-    <div class="segmented" role="group" aria-label="A letto entro mezzanotte?">
-      <button class="${yes ? 'on-yes' : ''}" data-action="sleep" data-iso="${iso}" data-val="1" aria-pressed="${yes}">Entro mezzanotte</button>
-      <button class="${no ? 'on-no' : ''}" data-action="sleep" data-iso="${iso}" data-val="0" aria-pressed="${no}">Più tardi</button>
-    </div>
-    <div class="time-row">
-      <label for="bed-${iso}">Orario a letto</label>
-      <div style="display:flex;align-items:center;gap:6px">
-        ${e.bed ? `<button class="time-clear" data-action="clear-bed" data-iso="${iso}">Rimuovi</button>` : ''}
-        <input class="time-input" id="bed-${iso}" type="time" value="${e.bed || ''}" data-change="bed" data-iso="${iso}" aria-label="Orario a letto">
-      </div>
-    </div>
-  </section>`;
-}
-
-function readCard(iso, { title, withTimer }) {
-  const info = C.dayInfo(state, iso, today);
-  const min = info.min;
-  const timer = getTimer();
-  const running = timer && timer.iso === iso;
-  const book = state.settings.book ? `<div class="small muted" style="margin:-4px 0 12px">📖 ${esc(state.settings.book)}</div>` : '';
-  const timerHtml = withTimer
-    ? running
-      ? `<div class="timer-box"><span class="pulse"></span><div><div class="t" data-timer>00:00</div><div class="small muted">Lettura in corso</div></div>
-          <button class="btn btn-green" data-action="timer-stop" data-iso="${iso}">${I.stop} Fine</button></div>`
-      : `<button class="btn btn-ghost" style="margin-top:14px" data-action="timer-start" data-iso="${iso}">${I.play} Avvia timer di lettura</button>`
-    : '';
-  return `<section class="card" data-card="read">
-    <div class="card-title"><span class="icon-badge green">${I.book}</span>${title}${pill(info.read, 'read')}</div>
-    ${book}
-    <div class="stepper">
-      <button class="round-btn" data-action="min-step" data-iso="${iso}" data-val="-5" aria-label="Togli 5 minuti">${I.minus}</button>
-      <div class="minutes"><div class="big-num" style="color:${min >= C.READ_GOAL_MIN ? 'var(--green)' : 'var(--text)'}">${min}<small>min</small></div>
-        <div class="goal">${min >= C.READ_GOAL_MIN ? 'Obiettivo raggiunto' : `Obiettivo: ${C.READ_GOAL_MIN} minuti`}</div></div>
-      <button class="round-btn" data-action="min-step" data-iso="${iso}" data-val="5" aria-label="Aggiungi 5 minuti">${I.plus}</button>
-    </div>
-    <div class="quick">
-      ${[5, 10, 15, 30].map((m) => `<button data-action="min-add" data-iso="${iso}" data-val="${m}">+${m}</button>`).join('')}
-    </div>
-    ${timerHtml}
-  </section>`;
-}
-
-function weekGoalsCard(stats) {
-  const idx = C.diffDays(state.start, today);
-  const block = stats.blocks.find((b) => idx >= b.from && idx <= b.to);
-  if (!block) return '';
-  return `<section class="card">
-    <div class="card-title">${block.label} · Obiettivi<span class="right muted">${C.formatDateShort(block.first)} – ${C.formatDateShort(block.last)}</span></div>
-    <div class="bar-row"><div class="top"><span>🌙 A letto entro mezzanotte</span><span>${block.sleepDone}/${block.sleepTarget}</span></div>
-      ${bar('wk-sleep', block.sleepDone / block.sleepTarget, 'violet')}</div>
-    <div class="bar-row" style="margin-top:14px"><div class="top"><span>📖 Lettura ≥ ${C.READ_GOAL_MIN} min</span><span>${block.readDone}/${block.readTarget}</span></div>
-      ${bar('wk-read', block.readDone / block.readTarget, 'green')}</div>
-    ${block.achieved ? `<p class="small" style="margin:14px 0 0;color:var(--green);font-weight:600">✓ Obiettivi della settimana raggiunti</p>` : ''}
-  </section>`;
-}
-
-// ---------- Viste ----------
-function headerHtml(eyebrow, title, right = '') {
-  return `<header class="header"><div class="header-row"><div><div class="eyebrow">${eyebrow}</div><h1 class="large-title">${title}</h1></div>${right}</div></header>`;
-}
-
-function countdownText(now = new Date()) {
-  if (now.getHours() < C.DAY_CUTOFF_HOUR) return { big: 'È tardi', label: 'Mezzanotte è passata: spegni tutto e vai a dormire.' };
-  const m = C.minutesToMidnight(now);
-  const h = Math.floor(m / 60);
-  const mm = m % 60;
-  return { big: h ? `${h} h ${String(mm).padStart(2, '0')} min` : `${mm} min`, label: 'a mezzanotte' };
-}
-
-function viewToday() {
-  if (!state.start) return '';
-  const stats = C.computeStats(state, today);
-  const eyebrow = cap(C.formatDateLong(today));
-  const installHint = !isStandalone() && !localStorage.getItem(HINT_KEY)
-    ? `<div class="banner"><div class="txt"><b>Installa MEZZANOTTE</b>Aggiungila alla schermata Home per usarla a schermo intero e offline.</div>
-        <div class="act"><button class="yes" data-action="install-help">Come</button><button class="no" data-action="hide-hint" aria-label="Chiudi">✕</button></div></div>`
-    : '';
-
-  if (!stats.started) {
-    const n = C.diffDays(today, state.start);
-    return `${headerHtml(eyebrow, 'Oggi')}${installHint}
-      <section class="card finished-card"><div class="trophy">🌙</div>
-        <h2 style="margin:0 0 6px">La sfida inizia ${n === 1 ? 'domani' : `tra ${n} giorni`}</h2>
-        <p class="muted" style="margin:0">Primo giorno: ${C.formatDateLong(state.start)}.</p></section>`;
-  }
-
-  if (stats.finished) {
-    const blocks = stats.blocks.filter((b) => b.achieved).length;
-    return `${headerHtml(eyebrow, 'Sfida completata')}
-      <section class="card finished-card"><div class="trophy">🏆</div>
-        <h2 style="margin:0 0 6px">30 giorni completati</h2>
-        <p class="muted" style="margin:0 0 18px">Obiettivi raggiunti in ${blocks} ${plural(blocks, 'blocco', 'blocchi')} su ${stats.blocks.length}. Completamento totale ${stats.overallRate}%.</p>
-        <div class="split" style="text-align:left"><div><b>${stats.sleepDone}</b><span>${plural(stats.sleepDone, 'notte', 'notti')} entro mezzanotte</span></div><div><b>${stats.totalMin}</b><span>minuti di lettura</span></div></div>
-        <button class="btn btn-primary" style="margin-top:18px" data-action="new-challenge">Inizia una nuova sfida</button>
-        <button class="btn btn-ghost" data-action="goto" data-tab="stats">Vedi le statistiche</button>
-      </section>`;
-  }
-
-  const idx = C.diffDays(state.start, today);
-  const block = C.blockProgress(state, C.blockForIndex(idx), today);
-  const cd = countdownText();
-  const sat = C.isSaturday(today);
-  const yesterday = C.addDays(today, -1);
-  const ySleep = yesterday >= state.start ? C.sleepStatus(state, yesterday, today) : null;
-  const yesterdayBanner = ySleep === 'pending'
-    ? `<div class="banner"><div class="txt"><b>Ieri sera</b>A letto entro mezzanotte?</div>
-        <div class="act"><button class="yes" data-action="sleep" data-iso="${yesterday}" data-val="1">Sì</button>
-        <button class="no" data-action="sleep" data-iso="${yesterday}" data-val="0">No</button>
-        <button class="no" data-action="open-day" data-iso="${yesterday}">Ora</button></div></div>`
-    : '';
-
-  const heroText = sat
-    ? `<div class="countdown" style="color:var(--amber)">Sabato</div><div class="label">Stasera niente vincolo del sonno. Non dimenticare la lettura.</div>`
-    : `<div class="countdown" data-countdown>${cd.big}</div><div class="label" data-countdown-label>${cd.label}</div>`;
-
-  return `${headerHtml(eyebrow, 'Oggi', `<span class="chip"><span class="dot"></span>Giorno ${stats.dayNum}/30</span>`)}
-    ${installHint}${yesterdayBanner}
-    <section class="card hero">
-      <div class="hero-rings">
-        <svg viewBox="0 0 128 128" width="128" height="128">
-          <defs>
-            <linearGradient id="gV" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#c4b5fd"/><stop offset="1" stop-color="#7c3aed"/></linearGradient>
-            <linearGradient id="gG" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#6ee7b7"/><stop offset="1" stop-color="#059669"/></linearGradient>
-          </defs>
-          ${ring('hero-s', 128, 12, block.sleepDone / block.sleepTarget, 'url(#gV)')}
-          <g transform="translate(16 16)">${ring('hero-r', 96, 12, block.readDone / block.readTarget, 'url(#gG)')}</g>
-        </svg>
-        <div class="center"><div><b>${stats.dayNum}</b><span>di 30</span></div></div>
-      </div>
-      <div class="hero-text">${heroText}
-        <div class="legend"><span><i style="background:var(--violet)"></i>Sonno ${block.sleepDone}/${block.sleepTarget}</span><span><i style="background:var(--green)"></i>Lettura ${block.readDone}/${block.readTarget}</span></div>
-      </div>
-    </section>
-    ${sleepCard(today, { title: sat ? 'Sabato sera' : 'Stanotte' })}
-    ${readCard(today, { title: 'Lettura di oggi', withTimer: true })}
-    ${weekGoalsCard(stats)}
-    <div class="tiles">
-      <div class="tile violet"><div class="k">${I.flame.replace('<svg', '<svg width="13" height="13"')} Serie sonno</div><div class="v">${stats.sleepStreak.current}<small>${plural(stats.sleepStreak.current, 'notte', 'notti')}</small></div><div class="s">Record ${stats.sleepStreak.best}</div></div>
-      <div class="tile green"><div class="k">${I.flame.replace('<svg', '<svg width="13" height="13"')} Serie lettura</div><div class="v">${stats.readStreak.current}<small>${plural(stats.readStreak.current, 'giorno', 'giorni')}</small></div><div class="s">Record ${stats.readStreak.best}</div></div>
-    </div>`;
-}
-
-function viewCalendar() {
-  if (!state.start) return '';
-  const stats = C.computeStats(state, today);
-  const legend = `<div class="cal-legend">
-    <span><i style="background:var(--violet)"></i>Sonno</span><span><i style="background:var(--green)"></i>Lettura</span>
-    <span><i style="background:rgba(255,107,107,.6)"></i>Mancato</span><span><i style="border:1.5px solid var(--amber)"></i>Sabato libero</span></div>`;
-  const blocks = stats.blocks.map((b) => {
-    const cells = [];
-    for (let i = b.from; i <= b.to; i++) {
-      const iso = C.addDays(state.start, i);
-      const info = C.dayInfo(state, iso, today);
-      const d = C.parseISO(iso);
-      const sCls = info.sleep === 'done' ? 's-done' : info.sleep === 'missed' ? 'missed' : info.sleep === 'free' ? 'free' : '';
-      const rCls = info.read === 'done' ? 'r-done' : info.read === 'missed' ? 'missed' : '';
-      const cls = ['day-cell', iso === today ? 'today' : '', info.sleep === 'future' ? 'future' : '', info.perfect ? 'perfect' : ''].join(' ');
-      cells.push(`<button class="${cls}" ${info.sleep === 'future' ? 'disabled' : `data-action="open-day" data-iso="${iso}"`} aria-label="Giorno ${i + 1}, ${C.formatDateLong(iso)}">
-        <span class="wd">${C.WEEKDAYS_SHORT[d.getDay()]}</span><span class="dn">${d.getDate()}</span>
-        <span class="marks"><i class="${sCls}"></i><i class="${rCls}"></i></span></button>`);
-    }
-    const tag = (ok, cls, done, target, icon) => `<span class="goal-tag ${ok ? `ok ${cls}` : ''}">${icon} ${done}/${target}</span>`;
-    return `<section class="card week-block">
-      <div class="week-head"><h3>${b.label}</h3><div class="goals">${tag(b.sleepOk, 'v', b.sleepDone, b.sleepTarget, '🌙')}${tag(b.readOk, 'g', b.readDone, b.readTarget, '📖')}</div></div>
-      <div class="days-grid">${cells.join('')}</div></section>`;
-  });
-  return `${headerHtml(`${C.formatDateShort(state.start)} – ${C.formatDateShort(C.endDate(state.start))}`, 'Calendario')}${legend}${blocks.join('')}`;
-}
-
-function bedChart() {
-  const dates = C.challengeDates(state.start);
-  const W = 320, H = 170, L = 38, R = 8, T = 10, B = 22;
-  const minOff = -180, maxOff = 120; // 21:00 → 02:00
-  const x = (i) => L + (i / (dates.length - 1)) * (W - L - R);
-  const y = (off) => T + ((Math.min(maxOff, Math.max(minOff, off)) - minOff) / (maxOff - minOff)) * (H - T - B);
-  const pts = dates.map((d, i) => ({ i, d, bed: state.days[d]?.bed })).filter((p) => p.bed && p.d <= today);
-  if (!pts.length) return '<div class="chart-empty">Registra l\'orario in cui vai a letto per vedere il grafico.</div>';
-  const grid = [-120, -60, 0, 60].map((o) => `<line x1="${L}" x2="${W - R}" y1="${y(o)}" y2="${y(o)}" stroke="${o === 0 ? 'rgba(167,139,250,.55)' : 'rgba(255,255,255,.06)'}" ${o === 0 ? 'stroke-dasharray="4 4"' : ''}/>
-    <text class="chart-label" x="${L - 6}" y="${y(o) + 3}" text-anchor="end" ${o === 0 ? 'style="fill:var(--violet)"' : ''}>${C.offsetToTime(o)}</text>`).join('');
-  let path = '';
-  pts.forEach((p, k) => {
-    const prev = pts[k - 1];
-    path += `${prev && prev.i === p.i - 1 ? 'L' : 'M'}${x(p.i).toFixed(1)} ${y(C.bedtimeOffset(p.bed)).toFixed(1)} `;
-  });
-  const dots = pts.map((p) => {
-    const ok = C.bedtimeOnTime(p.bed);
-    const sat = C.isSaturday(p.d);
-    const color = sat ? '#fbbf24' : ok ? '#a78bfa' : '#ff6b6b';
-    return `<circle cx="${x(p.i)}" cy="${y(C.bedtimeOffset(p.bed))}" r="3.6" fill="${color}" stroke="#15151c" stroke-width="1.5"/>`;
-  }).join('');
-  const xl = [0, 7, 14, 21, 29].map((i) => `<text class="chart-label" x="${x(i)}" y="${H - 6}" text-anchor="middle">G${i + 1}</text>`).join('');
-  return `<div class="chart-wrap"><svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Orari di sonno">
-    <defs><linearGradient id="bedLine" x1="0" x2="1"><stop offset="0" stop-color="#7c3aed"/><stop offset="1" stop-color="#c4b5fd"/></linearGradient></defs>
-    ${grid}<path d="${path}" fill="none" stroke="url(#bedLine)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" opacity=".8"/>${dots}${xl}</svg></div>`;
-}
-
-function readChart() {
-  const dates = C.challengeDates(state.start);
-  const W = 320, H = 150, L = 30, R = 8, T = 10, B = 22;
-  const mins = dates.map((d) => state.days[d]?.min || 0);
-  if (!mins.some((m) => m > 0)) return '<div class="chart-empty">I minuti di lettura appariranno qui.</div>';
-  const maxV = Math.max(30, Math.ceil(Math.max(...mins) / 15) * 15);
-  const bw = (W - L - R) / dates.length;
-  const y = (v) => T + (1 - v / maxV) * (H - T - B);
-  const ticks = [0, maxV / 2, maxV].map((v) => `<line x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}" stroke="rgba(255,255,255,.06)"/><text class="chart-label" x="${L - 6}" y="${y(v) + 3}" text-anchor="end">${Math.round(v)}</text>`).join('');
-  const goal = `<line x1="${L}" x2="${W - R}" y1="${y(C.READ_GOAL_MIN)}" y2="${y(C.READ_GOAL_MIN)}" stroke="rgba(52,211,153,.5)" stroke-dasharray="3 4"/>`;
-  const bars = mins.map((m, i) => {
-    if (!m) return '';
-    const h = Math.max(2, H - B - y(m));
-    return `<rect x="${(L + i * bw + bw * 0.18).toFixed(1)}" y="${y(m).toFixed(1)}" width="${(bw * 0.64).toFixed(1)}" height="${h.toFixed(1)}" rx="2" fill="${m >= C.READ_GOAL_MIN ? 'url(#readBar)' : 'rgba(255,255,255,.18)'}"/>`;
-  }).join('');
-  const xl = [0, 7, 14, 21, 29].map((i) => `<text class="chart-label" x="${L + i * bw + bw / 2}" y="${H - 6}" text-anchor="middle">G${i + 1}</text>`).join('');
-  return `<div class="chart-wrap"><svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Minuti di lettura">
-    <defs><linearGradient id="readBar" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#6ee7b7"/><stop offset="1" stop-color="#059669"/></linearGradient></defs>
-    ${ticks}${goal}${bars}${xl}</svg></div>`;
-}
-
-function viewStats() {
-  if (!state.start) return '';
-  const s = C.computeStats(state, today);
-  const weekRows = s.blocks.map((b) => {
-    const m = (ok, possible) => {
-      if (ok) return `<span class="medal ok">${I.check}</span>`;
-      if (b.phase === 'past' || !possible) return `<span class="medal fail">${I.x}</span>`;
-      return `<span class="medal">${I.star}</span>`;
-    };
-    const status = b.phase === 'future' ? 'In arrivo' : b.phase === 'current' ? 'In corso' : b.achieved ? 'Completata' : 'Conclusa';
-    return `<div class="week-goal"><div><div class="name">${b.label}</div>
-      <div class="sub">${status} · 🌙 ${b.sleepDone}/${b.sleepTarget} · 📖 ${b.readDone}/${b.readTarget}</div></div>
-      <div class="badges">${m(b.sleepOk, b.sleepPossible)}${m(b.readOk, b.readPossible)}</div></div>`;
-  }).join('');
-
-  const history = C.challengeDates(state.start).filter((d) => d <= today).reverse().map((d) => {
-    const info = C.dayInfo(state, d, today);
-    const bedCls = info.saturday ? 'dim' : info.sleep === 'done' ? 'v' : info.sleep === 'missed' ? 'bad' : 'dim';
-    const bedTxt = info.bed || (info.sleep === 'done' ? '✓' : info.sleep === 'missed' ? '✕' : info.saturday ? 'Libero' : '—');
-    const minCls = info.read === 'done' ? 'g' : info.min ? 'bad' : 'dim';
-    return `<li data-action="open-day" data-iso="${d}"><div class="d"><b>Giorno ${info.num}</b><span>${cap(C.formatDateShort(d))}${info.perfect ? ' · ⭐ perfetto' : ''}</span></div>
-      <div class="val ${bedCls}">🌙 ${bedTxt}</div><div class="val ${minCls}">📖 ${info.min} min</div></li>`;
-  }).join('');
-
-  return `${headerHtml(s.finished ? 'Sfida conclusa' : `Giorno ${s.dayNum ?? '—'} di 30`, 'Statistiche')}
-    <section class="card">
-      <div class="overview">
-        <div class="hero-rings" style="width:104px;height:104px">
-          <svg viewBox="0 0 104 104" width="104" height="104">
-            <defs><linearGradient id="gMix" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#a78bfa"/><stop offset="1" stop-color="#34d399"/></linearGradient></defs>
-            ${ring('st-all', 104, 11, s.overallRate / 100, 'url(#gMix)')}
-          </svg>
-          <div class="center"><div><b style="font-size:22px">${s.perfectDays}</b><span>perfetti</span></div></div>
-        </div>
-        <div><div class="pct">${s.overallRate}<small>%</small></div><div class="muted small">completamento dei giorni registrati</div></div>
-      </div>
-      <div class="split">
-        <div><b style="color:var(--violet)">${s.sleepRate}%</b><span>Sonno · ${s.sleepDone}/${s.sleepCounted} ${plural(s.sleepCounted, 'notte', 'notti')}</span></div>
-        <div><b style="color:var(--green)">${s.readRate}%</b><span>Lettura · ${s.readDone}/${s.readCounted} ${plural(s.readCounted, 'giorno', 'giorni')}</span></div>
-      </div>
-      <div class="bar-row" style="margin-top:16px"><div class="top"><span>Avanzamento sfida</span><span>${s.challengeProgress}%</span></div>${bar('st-prog', s.challengeProgress / 100, 'violet')}</div>
-    </section>
-
-    <div class="tiles">
-      <div class="tile violet"><div class="k">Serie sonno</div><div class="v">${s.sleepStreak.current}<small>${plural(s.sleepStreak.current, 'notte', 'notti')}</small></div><div class="s">Migliore: ${s.sleepStreak.best}</div></div>
-      <div class="tile green"><div class="k">Serie lettura</div><div class="v">${s.readStreak.current}<small>${plural(s.readStreak.current, 'giorno', 'giorni')}</small></div><div class="s">Migliore: ${s.readStreak.best}</div></div>
-      <div class="tile"><div class="k">Giorni perfetti</div><div class="v">${s.perfectDays}</div><div class="s">Serie migliore: ${s.perfectStreak.best}</div></div>
-      <div class="tile violet"><div class="k">Ora media a letto</div><div class="v">${s.avgBedTime ?? '—'}</div><div class="s">${s.bedsLogged} ${plural(s.bedsLogged, 'orario registrato', 'orari registrati')}</div></div>
-      <div class="tile green"><div class="k">Minuti letti</div><div class="v">${s.totalMin}<small>min</small></div><div class="s">Media ${s.avgMin} min nei giorni di lettura</div></div>
-      <div class="tile"><div class="k">Settimane vinte</div><div class="v">${s.blocks.filter((b) => b.achieved).length}<small>/ ${s.blocks.length}</small></div><div class="s">Record di lettura: ${s.maxMin} min</div></div>
-    </div>
-
-    <div class="section-label">Obiettivi settimanali</div>
-    <section class="card">${weekRows}
-      <p class="small muted" style="margin:10px 0 0">Sonno: 4 → 5 → 5 → 6 notti · Lettura: 4 → 5 → 6 → 6 giorni. Il sabato sera è libero.</p></section>
-
-    <div class="section-label">Storico orari di sonno</div>
-    <section class="card">${bedChart()}</section>
-
-    <div class="section-label">Storico minuti di lettura</div>
-    <section class="card">${readChart()}</section>
-
-    <div class="section-label">Diario</div>
-    <section class="card"><ul class="history-list">${history || '<li class="muted">Nessun giorno ancora.</li>'}</ul></section>`;
-}
-
-function viewSettings() {
-  const swReady = 'serviceWorker' in navigator && navigator.serviceWorker.controller;
-  const start = state.start;
-  return `${headerHtml('MEZZANOTTE', 'Impostazioni')}
-    <div class="section-label" style="margin-top:0">Sfida</div>
-    <div class="list">
-      <label class="list-item"><span class="lbl">Data di inizio</span><input type="date" value="${start || ''}" data-change="start"></label>
-      <div class="list-item"><span class="lbl">Ultimo giorno</span><span class="val">${start ? C.formatDateShort(C.endDate(start)) : '—'}</span></div>
-      <button class="list-item" data-action="new-challenge"><span class="lbl">Ricomincia da oggi<small>Archivia i progressi attuali e riparte dal giorno 1</small></span><span class="chev">${I.chev}</span></button>
-    </div>
-
-    <div class="section-label">Lettura</div>
-    <div class="list">
-      <label class="list-item"><span class="lbl">Libro in lettura</span><input type="text" maxlength="120" placeholder="Titolo" value="${esc(state.settings.book)}" data-change="book" enterkeyhint="done"></label>
-    </div>
-
-    <div class="section-label">Backup</div>
-    <div class="list">
-      <button class="list-item" data-action="export"><span class="icon-badge violet">${I.share}</span><span class="lbl">Esporta progressi<small>Salva un file .json in File, iCloud o dove preferisci</small></span><span class="chev">${I.chev}</span></button>
-      <button class="list-item" data-action="import"><span class="icon-badge green">${I.download}</span><span class="lbl">Importa da file<small>Ripristina un backup esportato in precedenza</small></span><span class="chev">${I.chev}</span></button>
-      <button class="list-item" data-action="import-text"><span class="icon-badge violet">${I.book}</span><span class="lbl">Incolla backup<small>Incolla il testo di un backup</small></span><span class="chev">${I.chev}</span></button>
-      <button class="list-item" data-action="copy-backup"><span class="icon-badge green">${I.check}</span><span class="lbl">Copia backup negli appunti</span><span class="chev">${I.chev}</span></button>
-    </div>
-
-    <div class="section-label">App</div>
-    <div class="list">
-      <button class="list-item" data-action="install-help"><span class="lbl">Installa sulla schermata Home</span><span class="val">${isStandalone() ? 'Installata' : ''}</span><span class="chev">${I.chev}</span></button>
-      <div class="list-item"><span class="lbl">Funzionamento offline</span><span class="val"><span class="status-dot ${swReady ? '' : 'off'}"></span>${swReady ? 'Pronto' : 'In preparazione'}</span></div>
-      <div class="list-item"><span class="lbl">Versione</span><span class="val">${VERSION}</span></div>
-    </div>
-
-    <div class="list">
-      <button class="list-item danger" data-action="reset"><span class="lbl">Cancella tutti i dati</span></button>
-    </div>
-    <p class="footnote">Gratuita, senza account e senza server.<br>I tuoi dati restano solo su questo dispositivo: esporta un backup ogni tanto.</p>
-    <input type="file" id="import-file" accept="application/json,.json,text/plain" hidden>`;
-}
-
-function onboardingHtml() {
-  const hint = isIOS() && !isStandalone()
-    ? `<p class="install-hint">Per installarla: in Safari tocca ${I.share} <b>Condividi</b>, poi <b>Aggiungi alla schermata Home</b>.</p>`
-    : '';
-  return `<div class="onboarding" id="onboarding"><div class="inner">
-    <img class="ob-logo" src="icons/icon-180.png" alt="">
-    <h1 class="ob-title">MEZZANOTTE</h1>
-    <p class="ob-sub">30 giorni per dormire meglio e leggere ogni giorno.</p>
-    <div class="ob-rules">
-      <div class="ob-rule"><span class="icon-badge violet">${I.moon}</span><div><b>A letto entro mezzanotte</b><span>Ogni sera, tranne il sabato: quella notte è libera.</span></div></div>
-      <div class="ob-rule"><span class="icon-badge green">${I.book}</span><div><b>Leggi almeno 5 minuti</b><span>Un libro vero, ogni giorno. Puoi usare il timer.</span></div></div>
-      <div class="ob-rule"><span class="icon-badge violet">${I.chart}</span><div><b>Obiettivi progressivi</b><span>Sonno 4 → 5 → 5 → 6 notti, lettura 4 → 5 → 6 → 6 giorni a settimana.</span></div></div>
-    </div>
-    <div class="ob-date"><label for="ob-start">Primo giorno</label><input id="ob-start" type="date" value="${today}"></div>
-    <button class="btn btn-primary" data-action="start">Inizia la sfida</button>
-    <button class="btn btn-ghost" data-action="import">Ripristina un backup</button>
-    ${hint}
-    <input type="file" id="import-file" accept="application/json,.json,text/plain" hidden>
-  </div></div>`;
-}
-
-// ---------- Rendering ----------
-const TABS = [
-  { id: 'today', label: 'Oggi', icon: I.today, view: viewToday },
-  { id: 'calendar', label: 'Calendario', icon: I.cal, view: viewCalendar },
-  { id: 'stats', label: 'Statistiche', icon: I.chart, view: viewStats },
-  { id: 'settings', label: 'Impostazioni', icon: I.gear, view: viewSettings },
-];
-
-function shell() {
-  const app = $('#app');
-  app.innerHTML = `${TABS.map((t) => `<section class="view" id="view-${t.id}" aria-label="${t.label}"><div class="view-inner"></div></section>`).join('')}
-    <nav class="tabbar" role="tablist">${TABS.map((t) => `<button class="tab" role="tab" data-action="goto" data-tab="${t.id}" aria-label="${t.label}">${t.icon}<span>${t.label}</span></button>`).join('')}</nav>`;
-}
-
-function render() {
-  if (!state.start) {
-    if (!$('#onboarding')) document.body.insertAdjacentHTML('beforeend', onboardingHtml());
+function switchTab(id, anchor) {
+  if (id === ui.tab && !anchor) {
+    $(`#view-${id}`).scrollTo({ top: 0, behavior: FX.reducedMotion() ? 'auto' : 'smooth' });
     return;
   }
-  for (const t of TABS) {
-    const view = $(`#view-${t.id}`);
-    view.classList.toggle('active', t.id === tab);
-    $('.view-inner', view).innerHTML = t.view();
-  }
-  document.querySelectorAll('.tab').forEach((b) => {
-    const on = b.dataset.tab === tab;
-    b.classList.toggle('active', on);
-    b.setAttribute('aria-selected', on);
-  });
-  if (sheetIso) renderSheet();
-  runAnimations();
-  tick();
-}
-
-function switchTab(id) {
-  if (id === tab) {
-    $(`#view-${id}`).scrollTo({ top: 0, behavior: 'smooth' });
-    return;
-  }
-  tab = id;
-  animateView($(`#view-${id}`));
+  ui.tab = id;
+  const view = $(`#view-${id}`);
+  view.scrollTop = 0;
+  document.querySelectorAll('.view.enter').forEach((v) => v.classList.remove('enter'));
+  view.classList.add('enter');
+  setTimeout(() => view.classList.remove('enter'), 400);
   render();
-}
-
-let animTimer;
-function animateView(view) {
-  document.querySelectorAll('.view.animate').forEach((v) => v.classList.remove('animate'));
-  void view.offsetWidth;
-  view.classList.add('animate');
-  clearTimeout(animTimer);
-  animTimer = setTimeout(() => view.classList.remove('animate'), 800);
+  if (anchor) requestAnimationFrame(() => document.getElementById(anchor)?.scrollIntoView({ block: 'start', behavior: FX.reducedMotion() ? 'auto' : 'smooth' }));
+  FX.haptic('light');
 }
 
 // ---------- Bottom sheet ----------
-function openSheet(iso) {
-  sheetIso = iso;
+function openSheet(sheet) {
+  ui.sheet = sheet;
   if (!$('.sheet')) {
     document.body.insertAdjacentHTML('beforeend', '<div class="sheet-backdrop" data-action="close-sheet"></div><div class="sheet" role="dialog" aria-modal="true"><div class="sheet-inner"></div></div>');
     attachSheetDrag($('.sheet'));
   }
   renderSheet();
+  $('.sheet').scrollTop = 0;
   requestAnimationFrame(() => requestAnimationFrame(() => {
-    $('.sheet-backdrop').classList.add('show');
-    $('.sheet').classList.add('show');
+    $('.sheet-backdrop')?.classList.add('show');
+    $('.sheet')?.classList.add('show');
   }));
 }
 
 function renderSheet() {
-  const iso = sheetIso;
-  const num = C.dayNumber(state.start, iso);
-  $('.sheet-inner').innerHTML = `<div class="grabber"></div>
-    <div class="sheet-head"><div><h2>Giorno ${num}</h2><p>${cap(C.formatDateLong(iso))}${iso === today ? ' · oggi' : ''}</p></div>
-      <button class="close-btn" data-action="close-sheet" aria-label="Chiudi">${I.x}</button></div>
-    ${sleepCard(iso, { title: C.isSaturday(iso) ? 'Sabato sera' : 'La notte' })}
-    ${readCard(iso, { title: 'Lettura', withTimer: iso === today })}
-    <button class="btn btn-primary" data-action="close-sheet">Fatto</button>`;
+  const s = ui.sheet;
+  const inner = $('.sheet-inner');
+  if (!s || !inner) return;
+  const x = ctx();
+  let html = '';
+  if (s.type === 'day') html = V.sheetDay(x, s.iso, s.focus);
+  else if (s.type === 'timer') html = V.sheetTimer(x);
+  else if (s.type === 'achievement') html = V.sheetAchievement(x, s.id);
+  else if (s.type === 'habit') html = V.sheetHabit(x, s.id);
+  else if (s.type === 'new-habit') html = V.sheetNewHabit(x);
+  else if (s.type === 'reminders') html = V.sheetReminders(x);
+  else if (s.type === 'catchup') html = V.sheetCatchup(x);
+  else if (s.type === 'install') html = V.sheetInstall(x);
+  else if (s.type === 'whats-new') html = V.sheetWhatsNew(x);
+  else if (s.type === 'summary') {
+    const j = state.journeys.find((y) => y.id === s.journey) || c.journey;
+    html = V.sheetSummary(x, E.journeySummary(state, j, today));
+  }
+  // conserva il focus su un campo di testo durante il rendering
+  const active = document.activeElement;
+  const keep = active && inner.contains(active) && active.id ? active.id : null;
+  inner.innerHTML = html;
+  $('.sheet').dataset.type = s.type;
+  if (keep) document.getElementById(keep)?.focus();
+  runAnimations(inner);
+  tick();
 }
 
 function closeSheet() {
   const sheet = $('.sheet');
   const bd = $('.sheet-backdrop');
+  const wasType = ui.sheet?.type;
+  ui.sheet = null;
   if (!sheet) return;
-  sheetIso = null;
+  if (document.activeElement && sheet.contains(document.activeElement)) document.activeElement.blur();
   sheet.style.transform = '';
   sheet.classList.remove('show');
-  bd.classList.remove('show');
-  setTimeout(() => { sheet.remove(); bd.remove(); }, 450);
+  bd?.classList.remove('show');
+  setTimeout(() => { if (!ui.sheet) { sheet.remove(); bd?.remove(); } }, 380);
+  if (wasType === 'catchup') ui.away = null;
+  render();
+  setTimeout(nextOverlay, 400);
 }
 
 function attachSheetDrag(sheet) {
   let y0 = null;
   let dy = 0;
   sheet.addEventListener('touchstart', (e) => {
-    if (sheet.scrollTop > 0) return;
+    if (sheet.scrollTop > 0 || e.target.closest('input, textarea')) return;
     y0 = e.touches[0].clientY;
     dy = 0;
     sheet.style.transition = 'none';
@@ -650,9 +457,9 @@ function dialog({ title, text = '', actions, textarea = false }) {
   return new Promise((resolve) => {
     const wrap = document.createElement('div');
     wrap.className = 'dialog-wrap';
-    wrap.innerHTML = `<div class="dialog" role="alertdialog" aria-modal="true"><div class="body"><h3>${esc(title)}</h3>${text ? `<p>${text}</p>` : ''}
+    wrap.innerHTML = `<div class="dialog" role="alertdialog" aria-modal="true"><div class="body"><h3>${V.esc(title)}</h3>${text ? `<p>${text}</p>` : ''}
       ${textarea ? '<textarea placeholder="Incolla qui il backup…" spellcheck="false"></textarea>' : ''}</div>
-      <div class="actions">${actions.map((a, i) => `<button data-i="${i}" class="${a.style || ''}">${esc(a.label)}</button>`).join('')}</div></div>`;
+      <div class="actions">${actions.map((a, i) => `<button data-i="${i}" class="${a.style || ''}">${V.esc(a.label)}</button>`).join('')}</div></div>`;
     document.body.appendChild(wrap);
     requestAnimationFrame(() => wrap.classList.add('show'));
     wrap.addEventListener('click', (e) => {
@@ -661,7 +468,7 @@ function dialog({ title, text = '', actions, textarea = false }) {
       const a = actions[Number(b.dataset.i)];
       const val = textarea ? { value: a.value, text: $('textarea', wrap).value } : a.value;
       wrap.classList.remove('show');
-      setTimeout(() => wrap.remove(), 260);
+      setTimeout(() => wrap.remove(), 220);
       resolve(val);
     });
   });
@@ -676,43 +483,62 @@ function toast(msg, icon = I.check, action) {
     el.setAttribute('role', 'status');
     document.body.appendChild(el);
   }
-  el.innerHTML = `<span style="width:18px;height:18px;color:var(--green);display:grid">${icon}</span><span>${esc(msg)}</span>${action ? `<button>${esc(action.label)}</button>` : ''}`;
-  if (action) $('button', el).onclick = action.run;
+  el.innerHTML = `<span class="ti">${icon}</span><span>${V.esc(msg)}</span>${action ? `<button>${V.esc(action.label)}</button>` : ''}`;
+  if (action) $('button', el).onclick = () => { el.classList.remove('show'); action.run(); };
   requestAnimationFrame(() => el.classList.add('show'));
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => el.classList.remove('show'), action ? 8000 : 2400);
+  toastTimer = setTimeout(() => el.classList.remove('show'), action ? 4500 : 2200);
 }
 
-function burst(el, color) {
-  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
-  const r = el.getBoundingClientRect();
-  const cx = r.left + r.width / 2;
-  const cy = r.top + r.height / 2;
-  const colors = [color, '#a78bfa', '#34d399', '#ffffff'];
-  for (let i = 0; i < 18; i++) {
-    const p = document.createElement('div');
-    p.className = 'burst';
-    p.style.background = colors[i % colors.length];
-    p.style.left = `${cx}px`;
-    p.style.top = `${cy}px`;
-    document.body.appendChild(p);
-    const a = (Math.PI * 2 * i) / 18 + Math.random() * 0.4;
-    const d = 50 + Math.random() * 60;
-    p.animate(
-      [{ transform: 'translate(-50%,-50%) scale(1)', opacity: 1 }, { transform: `translate(calc(-50% + ${Math.cos(a) * d}px), calc(-50% + ${Math.sin(a) * d}px)) scale(.2)`, opacity: 0 }],
-      { duration: 700 + Math.random() * 300, easing: 'cubic-bezier(.2,.7,.3,1)' },
-    ).onfinish = () => p.remove();
+// ---------- Registrazioni ----------
+function record(habitId, iso, patch, el, { undo = false, label } = {}) {
+  const prevEntry = state.entries[habitId]?.[iso] ? { ...state.entries[habitId][iso] } : null;
+  commit(S.setEntry(state, habitId, iso, patch), { el, habit: habitId, iso });
+  if (undo) {
+    toast(label || 'Registrato', I.check, { label: 'Annulla', run: () => commit(S.restoreEntry(state, habitId, iso, prevEntry)) });
+  }
+}
+
+function checkHabit(habitId, iso, el) {
+  const h = S.habitById(state, habitId);
+  if (!h) return;
+  const st = E.status(state, h, iso, today);
+  if (st === 'done') {
+    openSheet({ type: 'day', iso, focus: habitId });
+    return;
+  }
+  if (h.type === 'bedtime') {
+    const now = new Date();
+    const patch = { ok: true };
+    let label = 'Sonno registrato: entro mezzanotte';
+    if (iso === today && now.getHours() >= 21) {
+      patch.bed = D.nowTime(now);
+      label = `A letto alle ${patch.bed}: entro mezzanotte`;
+    }
+    record(habitId, iso, patch, el, { undo: true, label });
+  } else if (h.type === 'duration') {
+    const cur = state.entries[habitId]?.[iso]?.min || 0;
+    const goal = E.goalMinOn(h, iso);
+    record(habitId, iso, { min: Math.max(cur, goal) }, el, { undo: true, label: `${h.name}: ${Math.max(cur, goal)} minuti` });
+  } else {
+    record(habitId, iso, { done: true }, el, { undo: true, label: `${h.name}: fatto` });
   }
 }
 
 // ---------- Backup ----------
 async function exportBackup() {
-  const text = C.exportPayload(state);
-  const name = `mezzanotte-backup-${C.toISO(new Date())}.json`;
+  const text = S.exportPayload(state);
+  const name = `mezzanotte-backup-${D.toISO(new Date())}.json`;
   const file = new File([text], name, { type: 'application/json' });
+  const done = () => {
+    state = S.setMeta(state, { lastExport: new Date().toISOString() });
+    save();
+    render();
+  };
   try {
     if (navigator.canShare && navigator.canShare({ files: [file] })) {
       await navigator.share({ files: [file], title: 'Backup MEZZANOTTE' });
+      done();
       toast('Backup esportato');
       return;
     }
@@ -727,142 +553,291 @@ async function exportBackup() {
   a.click();
   a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 4000);
+  done();
   toast('Backup scaricato');
 }
 
 async function applyImport(text) {
   let next;
   try {
-    next = C.importPayload(text);
+    next = S.importPayload(text);
   } catch (err) {
-    await dialog({ title: 'Importazione non riuscita', text: esc(err.message), actions: [{ label: 'OK', value: true, style: 'strong' }] });
+    await dialog({ title: 'Importazione non riuscita', text: V.esc(err.message), actions: [{ label: 'OK', value: true, style: 'strong' }] });
     return;
   }
-  const days = Object.keys(next.days).length;
-  const ok = !state.start || await dialog({
-    title: 'Sostituire i progressi?',
-    text: `Il backup contiene ${days} ${plural(days, 'giorno registrato', 'giorni registrati')}${next.start ? ` (sfida iniziata ${C.formatDateShort(next.start)})` : ''}. I dati attuali verranno sostituiti.`,
+  const days = S.countEntries(next);
+  const j = next.journeys[next.journeys.length - 1];
+  const ok = !state.journeys.length || await dialog({
+    title: 'Sostituire i dati attuali?',
+    text: `Il backup contiene ${days} ${D.plural(days, 'giorno registrato', 'giorni registrati')}${j ? ` (percorso iniziato ${D.formatDateShort(j.start)})` : ''}. Prima di sostituirli, una copia dei dati attuali viene conservata su questo dispositivo.`,
     actions: [{ label: 'Annulla', value: false }, { label: 'Importa', value: true, style: 'strong' }],
   });
   if (!ok) return;
+  if (state.journeys.length) {
+    const cur = JSON.stringify(state);
+    lsSet(KEY_BEFORE_RESET, cur);
+    await idb.set(KEY_BEFORE_RESET, cur);
+  }
   state = next;
+  state = S.setMeta(state, { seen: { ...state.meta.seen, welcome: VERSION } });
+  markAllSeen();
   save();
   $('#onboarding')?.remove();
+  compute();
+  ui.lastXp = c.xp.total;
+  closeSheet();
   render();
-  toast('Progressi importati');
+  toast('Dati importati');
 }
 
 // ---------- Azioni ----------
+const goalDialog = (n, unit) => dialog({
+  title: `Nuovo minimo: ${n} ${unit}`,
+  text: 'Vale da oggi in avanti. I giorni passati, gli XP e i traguardi già ottenuti non cambiano.',
+  actions: [{ label: 'Annulla', value: false }, { label: 'Conferma', value: true, style: 'strong' }],
+});
+
 const actions = {
-  goto: (el) => switchTab(el.dataset.tab),
-  'open-day': (el) => openSheet(el.dataset.iso),
+  goto: (el) => switchTab(el.dataset.tab, el.dataset.anchor),
+  'progress-tab': (el) => { ui.progressTab = el.dataset.id; FX.haptic('light'); render(); },
+  'cal-prev': () => { const d = new Date(ui.calMonth.y, ui.calMonth.m - 1, 1); ui.calMonth = { y: d.getFullYear(), m: d.getMonth() }; render(); },
+  'cal-next': () => { const d = new Date(ui.calMonth.y, ui.calMonth.m + 1, 1); ui.calMonth = { y: d.getFullYear(), m: d.getMonth() }; render(); },
+  'history-more': () => { ui.historyLimit += 60; render(); },
+  'open-day': (el) => openSheet({ type: 'day', iso: el.dataset.iso, focus: el.dataset.focus || null }),
   'close-sheet': () => closeSheet(),
-  sleep: (el) => {
+  'habit-check': (el) => checkHabit(el.dataset.habit, el.dataset.iso, el),
+  'sleep-set': (el) => {
     const iso = el.dataset.iso;
     const val = el.dataset.val === '1';
-    const cur = state.days[iso]?.sleep;
-    update(iso, { sleep: cur === val ? null : val, ...(cur === val ? { bed: null } : {}) }, el);
+    const cur = state.entries.sleep[iso]?.ok;
+    if (cur === val && ui.sheet) record('sleep', iso, { ok: null, bed: null }, el);
+    else record('sleep', iso, { ok: val }, el, { undo: !ui.sheet, label: val ? 'Sonno registrato: entro mezzanotte' : 'Registrato: dopo mezzanotte' });
   },
-  'clear-bed': (el) => update(el.dataset.iso, { bed: null }),
-  'min-step': (el) => {
+  'clear-bed': (el) => record('sleep', el.dataset.iso, { bed: null }, el),
+  'hours-step': (el) => {
     const iso = el.dataset.iso;
-    const cur = state.days[iso]?.min || 0;
+    const goal = S.habitById(state, 'sleep').config.hoursGoal;
+    const cur = state.entries.sleep[iso]?.hours || 0;
+    const next = cur ? cur + Number(el.dataset.val) : goal;
+    record('sleep', iso, { hours: Math.min(12, Math.max(3, next)) }, el);
+  },
+  'hours-clear': (el) => record('sleep', el.dataset.iso, { hours: null }, el),
+  'min-step': (el) => {
+    const { habit, iso } = el.dataset;
+    const cur = state.entries[habit]?.[iso]?.min || 0;
     const delta = Number(el.dataset.val);
     const next = delta > 0 ? Math.floor(cur / 5) * 5 + 5 : Math.max(0, Math.ceil(cur / 5) * 5 - 5);
-    update(iso, { min: next || null }, el);
+    record(habit, iso, { min: next || null }, el);
   },
   'min-add': (el) => {
-    const iso = el.dataset.iso;
-    update(iso, { min: (state.days[iso]?.min || 0) + Number(el.dataset.val) }, el);
+    const { habit, iso } = el.dataset;
+    record(habit, iso, { min: (state.entries[habit]?.[iso]?.min || 0) + Number(el.dataset.val) }, el);
   },
-  'timer-start': (el) => {
-    setTimer({ iso: el.dataset.iso, startedAt: Date.now() });
+  'check-set': (el) => {
+    const { habit, iso } = el.dataset;
+    const val = el.dataset.val === '1';
+    const cur = state.entries[habit]?.[iso]?.done;
+    record(habit, iso, { done: cur === val ? null : val }, el);
+  },
+  'catchup-read': (el) => {
+    const iso = el.dataset.iso;
+    const h = S.habitById(state, 'read');
+    const cur = state.entries.read[iso]?.min || 0;
+    const goal = E.goalMinOn(h, iso);
+    record('read', iso, { min: cur >= goal ? null : goal }, el);
+  },
+  'catchup-done': () => { ui.away = null; closeSheet(); },
+  'open-catchup': () => openSheet({ type: 'catchup' }),
+  'away-dismiss': () => { ui.away = null; render(); },
+  // timer
+  'open-timer': () => openSheet({ type: 'timer' }),
+  'timer-start': () => {
+    setTimer({ habit: 'read', iso: today, acc: 0, since: Date.now() });
+    ui.timerGoalNotified = false;
+    FX.haptic('light');
     render();
   },
-  'timer-stop': (el) => {
+  'timer-pause': () => {
+    const t = getTimer();
+    if (t && t.since) setTimer({ ...t, acc: timerElapsed(t), since: null });
+    FX.haptic('light');
+    render();
+  },
+  'timer-resume': () => {
+    const t = getTimer();
+    if (t && !t.since) setTimer({ ...t, since: Date.now() });
+    FX.haptic('light');
+    render();
+  },
+  'timer-finish': (el) => {
     const t = getTimer();
     setTimer(null);
     if (!t) return render();
-    const secs = (Date.now() - t.startedAt) / 1000;
-    const add = secs < 30 ? 0 : Math.max(1, Math.round(secs / 60));
-    if (add) {
-      update(t.iso, { min: (state.days[t.iso]?.min || 0) + add }, el);
-      toast(`+${add} min di lettura`);
-    } else {
+    const ms = timerElapsed(t);
+    const add = ms < 30000 ? 0 : Math.max(1, Math.round(ms / 60000));
+    if (!add) {
       render();
-      toast('Sessione troppo breve', I.x);
+      toast('Sessione troppo breve per essere salvata', I.info);
+      return;
     }
+    ui.sheet = null;
+    closeSheet();
+    record('read', t.iso, { min: (state.entries.read[t.iso]?.min || 0) + add }, el);
+    toast(`+${add} min di lettura salvati`, I.book);
   },
-  start: async () => {
-    const v = $('#ob-start')?.value;
-    const start = C.isValidISO(v) ? v : today;
-    state = { ...state, start, updatedAt: new Date().toISOString() };
-    save();
-    tab = 'today';
-    const ob = $('#onboarding');
-    animateView($('#view-today'));
-    render();
-    if (ob) {
-      ob.classList.add('hide');
-      setTimeout(() => ob.remove(), 500);
+  'timer-discard': async () => {
+    const t = getTimer();
+    if (t && timerElapsed(t) > 60000) {
+      const ok = await dialog({ title: 'Annullare la sessione?', text: 'I minuti di questa sessione non verranno salvati.', actions: [{ label: 'No', value: false }, { label: 'Annulla sessione', value: true, style: 'destructive' }] });
+      if (!ok) return;
     }
-    navigator.storage?.persist?.().catch(() => {});
-  },
-  'new-challenge': async () => {
-    const ok = await dialog({
-      title: 'Nuova sfida',
-      text: 'I progressi attuali verranno archiviati e una nuova sfida di 30 giorni inizierà oggi.',
-      actions: [{ label: 'Annulla', value: false }, { label: 'Inizia', value: true, style: 'strong' }],
-    });
-    if (!ok) return;
-    const archived = state.start ? [...state.archive, { start: state.start, days: state.days, endedAt: new Date().toISOString() }] : state.archive;
-    state = { ...state, start: today, days: {}, archive: archived, updatedAt: new Date().toISOString() };
     setTimer(null);
-    save();
-    animMemory.clear();
-    tab = 'today';
     render();
-    toast('Nuova sfida iniziata');
   },
+  'quick-read': (el) => {
+    closeSheet();
+    checkHabit('read', today, el);
+  },
+  // proposte (mai applicate senza consenso)
+  proposal: async (el) => {
+    const key = el.dataset.key;
+    const p = E.proposals(state, c).find((x) => x.key === key);
+    if (!p) return;
+    const yes = el.dataset.val === '1';
+    let next = S.decideProposal(state, key, yes ? 'accepted' : 'declined', today);
+    if (yes) {
+      if (p.type === 'reduce') next = S.setJourneyAdjust(next, p.journeyId, p.blockIdx, p.habitId, p.to);
+      if (p.type === 'read-up') next = S.setReadGoal(next, p.to, today);
+      if (p.type === 'hours-up') next = S.updateHabit(next, 'sleep', (h) => { h.config.hoursGoal = p.to; return h; });
+    }
+    commit(next);
+    toast(yes ? 'Obiettivo aggiornato' : 'Va bene, il piano resta invariato');
+  },
+  // percorso
+  'open-summary': (el) => openSheet({ type: 'summary', journey: Number(el.dataset.journey) }),
+  'start-next': async (el) => {
+    const j = c.journey;
+    const sum = E.journeySummary(state, j, today);
+    const plan = sum.next.id === el.dataset.plan ? sum.next.plan : S.DEFAULT_PLAN;
+    const ok = await dialog({ title: 'Iniziare il nuovo percorso oggi?', text: 'Lo storico, gli XP e i traguardi restano. Il nuovo percorso parte dal giorno 1.', actions: [{ label: 'Annulla', value: false }, { label: 'Inizia', value: true, style: 'strong' }] });
+    if (!ok) return;
+    closeSheet();
+    commit(S.startJourney(state, today, plan));
+    switchTab('today');
+    toast('Nuovo percorso iniziato', I.flag);
+  },
+  'new-journey': async () => {
+    const ok = await dialog({ title: 'Nuovo percorso', text: 'Il percorso attuale si chiude e ne inizia uno nuovo da oggi, con gli obiettivi 4 → 5 → 5 → 6. Lo storico, gli XP e i traguardi restano.', actions: [{ label: 'Annulla', value: false }, { label: 'Inizia', value: true, style: 'strong' }] });
+    if (!ok) return;
+    commit(S.startJourney(state, today));
+    switchTab('today');
+    toast('Nuovo percorso iniziato', I.flag);
+  },
+  // traguardi e abitudini
+  'open-achievement': (el) => openSheet({ type: 'achievement', id: el.dataset.id }),
+  'open-habit': (el) => openSheet({ type: 'habit', id: el.dataset.id }),
+  'new-habit': async () => {
+    const ended = ['completed', 'ended'].includes(c.journeyState) || state.journeys.length > 1;
+    if (!ended) {
+      await dialog({ title: 'Una cosa alla volta', text: 'Le nuove abitudini si sbloccano al termine del primo percorso di 30 giorni. Aggiungerne troppe insieme è la causa più comune di abbandono: prima rendi automatici sonno e lettura.', actions: [{ label: 'Ho capito', value: true, style: 'strong' }] });
+      return;
+    }
+    ui.draft = { name: '', type: 'check', min: 10, perWeek: 4, icon: 'run', color: 'gold' };
+    openSheet({ type: 'new-habit' });
+  },
+  draft: (el) => { ui.draft[el.dataset.k] = el.dataset.v; renderSheet(); },
+  'draft-step': (el) => {
+    const k = el.dataset.k;
+    const lim = k === 'min' ? [5, 120] : [1, 7];
+    ui.draft[k] = Math.min(lim[1], Math.max(lim[0], ui.draft[k] + Number(el.dataset.val)));
+    renderSheet();
+  },
+  'create-habit': () => {
+    const name = ($('#nh-name')?.value || ui.draft.name || '').trim();
+    if (!name) { $('#nh-name')?.focus(); toast('Dai un nome all\'abitudine', I.info); return; }
+    commit(S.addHabit(state, { ...ui.draft, name }, today));
+    closeSheet();
+    toast('Abitudine aggiunta', I.plus);
+  },
+  'archive-habit': async (el) => {
+    const ok = await dialog({ title: 'Archiviare l\'abitudine?', text: 'Non comparirà più da domani. Lo storico, gli XP e i traguardi restano.', actions: [{ label: 'Annulla', value: false }, { label: 'Archivia', value: true, style: 'destructive' }] });
+    if (!ok) return;
+    closeSheet();
+    commit(S.archiveHabit(state, el.dataset.id, D.addDays(today, 1)));
+  },
+  'goal-step': async (el) => {
+    const id = el.dataset.id;
+    const h = S.habitById(state, id);
+    const cur = E.goalMinOn(h, today);
+    const n = Math.min(60, Math.max(5, cur + Number(el.dataset.val)));
+    if (n === cur) return;
+    if (!(await goalDialog(n, 'minuti al giorno'))) return;
+    commit(S.setDurationGoal(state, id, n, today));
+  },
+  'hours-goal': (el) => {
+    commit(S.updateHabit(state, 'sleep', (h) => { h.config.hoursGoal = Math.min(9, Math.max(6, h.config.hoursGoal + Number(el.dataset.val))); return h; }));
+  },
+  'toggle-routine': () => commit(S.updateHabit(state, 'sleep', (h) => { h.config.routine = !h.config.routine; return h; })),
+  'toggle-sound': () => { commit(S.setSettings(state, { sound: !state.settings.sound })); FX.configure(state.settings); FX.sound('done'); },
+  'toggle-haptics': () => { commit(S.setSettings(state, { haptics: !state.settings.haptics })); FX.configure(state.settings); FX.haptic('light'); },
+  'toggle-motion': () => { commit(S.setSettings(state, { motion: state.settings.motion === 'reduce' ? 'system' : 'reduce' })); FX.configure(state.settings); },
+  'open-reminders': () => openSheet({ type: 'reminders' }),
+  'install-help': () => openSheet({ type: 'install' }),
+  'whats-new': () => openSheet({ type: 'whats-new' }),
+  // dati
   export: () => exportBackup(),
   import: () => $('#import-file')?.click(),
   'import-text': async () => {
-    const r = await dialog({ title: 'Incolla backup', textarea: true, actions: [{ label: 'Annulla', value: false }, { label: 'Importa', value: true, style: 'strong' }] });
+    const r = await dialog({ title: 'Incolla un backup', textarea: true, actions: [{ label: 'Annulla', value: false }, { label: 'Importa', value: true, style: 'strong' }] });
     if (r && r.value && r.text.trim()) applyImport(r.text);
   },
   'copy-backup': async () => {
     try {
-      await navigator.clipboard.writeText(C.exportPayload(state));
+      await navigator.clipboard.writeText(S.exportPayload(state));
       toast('Backup copiato negli appunti');
     } catch {
-      toast('Copia non disponibile', I.x);
+      toast('Copia non disponibile', I.info);
     }
-  },
-  'install-help': () => dialog({
-    title: isStandalone() ? 'App installata' : 'Installa su iPhone',
-    text: isStandalone()
-      ? 'Stai già usando MEZZANOTTE dalla schermata Home.'
-      : '1. Apri questa pagina in <b>Safari</b>.<br>2. Tocca <b>Condividi</b> (il quadrato con la freccia).<br>3. Scegli <b>Aggiungi alla schermata Home</b> e conferma.<br><br>L\'app si aprirà a schermo intero e funzionerà anche offline.',
-    actions: [{ label: 'OK', value: true, style: 'strong' }],
-  }),
-  'hide-hint': () => {
-    try { localStorage.setItem(HINT_KEY, '1'); } catch { /* ignora */ }
-    render();
   },
   reset: async () => {
     const ok = await dialog({
-      title: 'Cancellare tutto?',
-      text: 'Tutti i progressi saranno eliminati da questo dispositivo. L\'operazione non si può annullare.',
+      title: 'Cancellare tutti i dati?',
+      text: 'Progressi, XP e traguardi verranno eliminati da questo dispositivo. Esporta prima un backup se vuoi conservarli.',
       actions: [{ label: 'Annulla', value: false }, { label: 'Cancella', value: true, style: 'destructive' }],
     });
     if (!ok) return;
-    state = C.createState(null);
+    const again = await dialog({ title: 'Sei sicuro?', text: 'L\'operazione non si può annullare dall\'app.', actions: [{ label: 'No', value: false, style: 'strong' }, { label: 'Sì, cancella', value: true, style: 'destructive' }] });
+    if (!again) return;
+    const cur = JSON.stringify(state);
+    lsSet(KEY_BEFORE_RESET, cur);
+    await idb.set(KEY_BEFORE_RESET, cur);
+    state = S.createState();
     setTimer(null);
+    V.animMemory.clear();
     save();
-    animMemory.clear();
-    closeSheet();
-    tab = 'today';
+    compute();
+    ui.sheet = null;
+    $('.sheet')?.remove();
+    $('.sheet-backdrop')?.remove();
+    ui.tab = 'today';
     render();
+  },
+  start: () => {
+    const v = $('#ob-start')?.value;
+    const start = D.isValidISO(v) ? v : today;
+    state = S.startJourney(state, start);
+    state = S.setMeta(state, { lastOpen: today, seen: { ...state.meta.seen, welcome: VERSION } });
+    save();
+    compute();
+    ui.lastXp = c.xp.total;
+    ui.tab = 'today';
+    const ob = $('#onboarding');
+    render();
+    if (ob) {
+      ob.classList.add('hide');
+      setTimeout(() => ob.remove(), 450);
+    }
+    navigator.storage?.persist?.().catch(() => {});
   },
 };
 
@@ -878,77 +853,103 @@ async function onChange(e) {
   if (!kind) return;
   if (kind === 'bed') {
     const v = el.value;
-    if (C.isValidTime(v)) update(el.dataset.iso, { bed: v }, el);
-    else if (!v) update(el.dataset.iso, { bed: null });
+    if (D.isValidTime(v)) record('sleep', el.dataset.iso, { bed: v }, el);
+    else if (!v) record('sleep', el.dataset.iso, { bed: null }, el);
+  } else if (kind === 'min') {
+    const n = Math.round(Number(el.value));
+    record(el.dataset.habit, el.dataset.iso, { min: Number.isFinite(n) && n > 0 ? Math.min(1440, n) : null }, el);
   } else if (kind === 'book') {
-    state = { ...state, settings: { ...state.settings, book: el.value.trim().slice(0, 120) }, updatedAt: new Date().toISOString() };
-    save();
-    render();
-    toast('Libro salvato');
-  } else if (kind === 'start') {
+    commit(S.updateHabit(state, 'read', (h) => { h.config.book = el.value.trim().slice(0, 120); return h; }));
+    toast('Libro salvato', I.book);
+  } else if (kind === 'wake') {
+    if (D.isValidTime(el.value)) commit(S.updateHabit(state, 'sleep', (h) => { h.config.wake = el.value; return h; }));
+  } else if (kind === 'reading-reminder') {
+    if (D.isValidTime(el.value)) commit(S.setSettings(state, { reminders: { reading: el.value } }));
+  } else if (kind === 'draft-name') {
+    ui.draft.name = el.value;
+  } else if (kind === 'journey-start') {
     const v = el.value;
-    if (!C.isValidISO(v) || v === state.start) return render();
+    const j = c.journey;
+    if (!D.isValidISO(v) || v === j.start) return render();
     const ok = await dialog({
       title: 'Cambiare la data di inizio?',
-      text: `La sfida andrà dal ${C.formatDateShort(v)} al ${C.formatDateShort(C.endDate(v))}. I giorni già registrati restano salvati.`,
+      text: `Il percorso andrà dal ${D.formatDateShort(v)} al ${D.formatDateShort(D.addDays(v, 29))}. Le registrazioni restano tutte salvate.`,
       actions: [{ label: 'Annulla', value: false }, { label: 'Cambia', value: true, style: 'strong' }],
     });
     if (ok) {
-      state = { ...state, start: v, updatedAt: new Date().toISOString() };
-      save();
-      animMemory.clear();
+      V.animMemory.clear();
+      commit(S.setJourneyStart(state, v));
       toast('Data di inizio aggiornata');
-    }
-    render();
+    } else render();
   }
 }
 
-// ---------- Orologio ----------
+// ---------- Orologio: cambio di giorno, conto alla rovescia, timer ----------
 function tick() {
   const now = new Date();
-  const lt = C.logicalToday(now);
+  const lt = D.logicalToday(now);
   if (lt !== today) {
     today = lt;
+    state = S.setMeta(state, { lastOpen: today });
+    save();
+    compute();
     render();
+    celebrate();
     return;
   }
-  const cd = countdownText(now);
-  document.querySelectorAll('[data-countdown]').forEach((n) => { n.textContent = cd.big; });
-  document.querySelectorAll('[data-countdown-label]').forEach((n) => { n.textContent = cd.label; });
+  const mins = now.getHours() < D.DAY_CUTOFF_HOUR ? null : D.minutesToMidnight(now);
+  document.querySelectorAll('[data-countdown]').forEach((n) => {
+    n.textContent = mins === null ? 'Mezzanotte è passata: chiudi tutto e vai a dormire' : `Mancano ${D.formatDuration(mins)} a mezzanotte`;
+  });
   const t = getTimer();
   if (t) {
-    const s = Math.max(0, Math.floor((Date.now() - t.startedAt) / 1000));
+    const ms = timerElapsed(t);
+    const s = Math.floor(ms / 1000);
     const txt = `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
     document.querySelectorAll('[data-timer]').forEach((n) => { n.textContent = txt; });
+    const ringEl = document.querySelector('[data-timer-ring]');
+    if (ringEl) {
+      const goal = Number(ringEl.dataset.goal);
+      const already = Number(ringEl.dataset.already);
+      const p = Math.min(1, (already + ms) / goal);
+      const circ = Number(ringEl.getAttribute('stroke-dasharray'));
+      ringEl.style.strokeDashoffset = String(circ * (1 - p));
+      const reached = p >= 1;
+      ringEl.closest('.t-ring')?.classList.toggle('reached', reached);
+      const lbl = document.querySelector('[data-timer-label]');
+      if (lbl) lbl.textContent = !t.since ? 'in pausa' : reached ? 'obiettivo raggiunto' : 'in lettura';
+      if (reached && !ui.timerGoalNotified && t.since) {
+        ui.timerGoalNotified = true;
+        FX.haptic('success');
+        FX.sound('soft');
+      }
+    }
   }
 }
 
-// ---------- Service worker ----------
+// ---------- Service worker: aggiornamenti automatici e sicuri ----------
 function registerSW() {
   if (!('serviceWorker' in navigator)) return;
-  navigator.serviceWorker.register('sw.js').then((reg) => {
-    const ask = (w) => toast('Nuova versione disponibile', I.star, { label: 'Aggiorna', run: () => w.postMessage('skipWaiting') });
-    if (reg.waiting && navigator.serviceWorker.controller) ask(reg.waiting);
-    reg.addEventListener('updatefound', () => {
-      const w = reg.installing;
-      w?.addEventListener('statechange', () => {
-        if (w.state === 'installed' && navigator.serviceWorker.controller) ask(w);
-        if (w.state === 'activated' && tab === 'settings') render();
-      });
-    });
-    setInterval(() => reg.update().catch(() => {}), 60 * 60 * 1000);
-  }).catch(() => {});
+  const hadController = !!navigator.serviceWorker.controller;
   let reloading = false;
   navigator.serviceWorker.addEventListener('controllerchange', () => {
-    if (reloading) return;
+    if (!hadController || reloading) return;
     reloading = true;
+    save();
     window.location.reload();
   });
+  navigator.serviceWorker.register('sw.js').then((reg) => {
+    const check = () => reg.update().catch(() => {});
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) check(); });
+    setInterval(check, 60 * 60 * 1000);
+  }).catch(() => {});
 }
 
 // ---------- Avvio ----------
 async function boot() {
-  state = await loadState();
+  const { s, source } = await loadState();
+  state = s;
+  FX.configure(state.settings);
   shell();
   document.addEventListener('click', (e) => {
     const el = e.target.closest('[data-action]');
@@ -958,12 +959,41 @@ async function boot() {
   });
   document.addEventListener('change', onChange);
   document.addEventListener('visibilitychange', () => { if (!document.hidden) tick(); });
+  window.matchMedia('(prefers-reduced-motion: reduce)').addEventListener?.('change', () => FX.configure(state.settings));
   setInterval(tick, 1000);
-  animateView($(`#view-${tab}`));
-  render();
-  if (state.start) navigator.storage?.persist?.().catch(() => {});
+
+  if (state.journeys.length) {
+    compute();
+    // rientro dopo qualche giorno: messaggio positivo e possibilità di recuperare
+    const last = state.meta.lastOpen;
+    if (last && D.diffDays(last, today) >= 3) {
+      const ts = E.trackingStart(state);
+      const from = D.maxISO(D.maxISO(last, D.addDays(today, -7)), ts);
+      const days = from <= D.addDays(today, -1) ? D.rangeISO(from, D.addDays(today, -1)).filter((d) => {
+        const info = E.dayInfo(state, d, today);
+        return Object.values(info.status).some((x) => x === 'unlogged' || x === 'pending' || x === 'partial');
+      }).reverse() : [];
+      if (days.length) ui.away = { days };
+    }
+    state = S.setMeta(state, { lastOpen: today });
+    const firstRun = !state.meta.seen.welcome;
+    if (firstRun) {
+      markAllSeen();
+      state = S.setMeta(state, { seen: { ...state.meta.seen, welcome: VERSION } });
+    }
+    save();
+    compute();
+    ui.lastXp = c.xp.total;
+    render();
+    if (firstRun) overlayQueue.push({ cls: 'ov-welcome-wrap', html: V.overlayWelcome(ctx()) });
+    celebrate();
+    nextOverlay();
+    navigator.storage?.persist?.().catch(() => {});
+  } else {
+    render();
+  }
   registerSW();
-  window.__mezzanotte = { get state() { return state; }, core: C, version: VERSION };
+  window.__mezzanotte = { get state() { return state; }, get computed() { return c; }, store: S, engine: E, core: D, version: VERSION, source };
 }
 
 boot();

@@ -1,5 +1,5 @@
-// MEZZANOTTE — service worker: funzionamento offline completo.
-const VERSION = 'mezzanotte-v1.0.0';
+// MEZZANOTTE — service worker: funzionamento offline completo e aggiornamenti affidabili.
+const VERSION = 'mezzanotte-v3.0.0';
 const CORE = [
   './',
   './index.html',
@@ -7,6 +7,12 @@ const CORE = [
   './css/app.css',
   './js/app.js',
   './js/core.js',
+  './js/store.js',
+  './js/engine.js',
+  './js/messages.js',
+  './js/views.js',
+  './js/icons.js',
+  './js/fx.js',
   './icons/icon.svg',
   './icons/icon-32.png',
   './icons/icon-120.png',
@@ -18,9 +24,13 @@ const CORE = [
   './icons/icon-maskable-512.png',
 ];
 
+// La nuova versione si installa e si attiva subito: le pagine aperte si ricaricano da sole
+// (anche quelle della versione 1.x, che ricaricano al cambio di controller). I dati non vengono toccati.
 self.addEventListener('install', (event) => {
   event.waitUntil(
-    caches.open(VERSION).then((cache) => cache.addAll(CORE.map((u) => new Request(u, { cache: 'reload' })))),
+    caches.open(VERSION)
+      .then((cache) => cache.addAll(CORE.map((u) => new Request(u, { cache: 'reload' }))))
+      .then(() => self.skipWaiting()),
   );
 });
 

@@ -4,8 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
   <title>MEZZANOTTE</title>
-  <meta name="description" content="Sfida di 30 giorni: a letto entro mezzanotte e 5 minuti di lettura al giorno.">
-  <meta name="theme-color" content="#000000">
+  <meta name="description" content="Sistema di crescita personale: a letto entro mezzanotte e almeno 5 minuti di lettura al giorno, in un percorso di 30 giorni.">
+  <meta name="theme-color" content="#04050a">
   <meta name="color-scheme" content="dark">
   <meta name="format-detection" content="telephone=no">
 
@@ -41,9 +41,18 @@
   <link rel="apple-touch-startup-image" href="icons/splash-640x1136.png" media="(device-width: 320px) and (device-height: 568px) and (-webkit-device-pixel-ratio: 2) and (orientation: portrait)">
 
   <link rel="stylesheet" href="css/app.css">
+  <link rel="modulepreload" href="js/core.js">
+  <link rel="modulepreload" href="js/store.js">
+  <link rel="modulepreload" href="js/engine.js">
+  <link rel="modulepreload" href="js/views.js">
 </head>
 <body>
   <div class="ambient"></div>
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+    <defs>
+      <linearGradient id="gMix" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#ab9fff"/><stop offset="1" stop-color="#63d7ab"/></linearGradient>
+    </defs>
+  </svg>
   <main id="app" aria-live="polite"></main>
   <noscript><p style="padding:40px;text-align:center">MEZZANOTTE richiede JavaScript.</p></noscript>
   <script type="module" src="js/app.js"></script>

@@ -1,0 +1,3 @@
+Copia esatta dell'app MEZZANOTTE 1.0.0 (commit 3877f22), usata dai test end-to-end
+per verificare l'aggiornamento reale 1.x → 3.x tramite service worker e la migrazione dei dati.
+Le icone vengono collegate da site/icons durante il test.
