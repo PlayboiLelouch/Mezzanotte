@@ -2,7 +2,7 @@ name: Pubblica su GitHub Pages
 
 on:
   push:
-    branches: [main, claude/wizardly-noether-e69xrb]
+    branches: [main]
   workflow_dispatch:
 
 permissions:
