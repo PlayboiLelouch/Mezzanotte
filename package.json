@@ -1,0 +1,13 @@
+{
+  "name": "mezzanotte",
+  "version": "1.0.0",
+  "private": true,
+  "description": "PWA MEZZANOTTE: sfida di 30 giorni (sonno entro mezzanotte + lettura)",
+  "type": "module",
+  "scripts": {
+    "test": "node --test tests/core.test.mjs",
+    "test:e2e": "node tests/e2e.mjs",
+    "serve": "python3 -m http.server 8080 --directory site",
+    "icons": "node tools/make-icons.mjs && python3 tools/compress.py"
+  }
+}
