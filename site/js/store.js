@@ -10,10 +10,13 @@
 import * as D from './core.js';
 
 export const APP_ID = 'mezzanotte';
-export const SCHEMA_VERSION = 2;
+export const SCHEMA_VERSION = 3;
+// Inizio ufficiale della sfida: i giorni precedenti erano di prova (schema 3).
+export const OFFICIAL_START = '2026-11-30';
 export const KEY_V1 = 'mezzanotte:v1';
 export const KEY_V2 = 'mezzanotte:v2';
 export const KEY_PRE_MIGRATION = 'mezzanotte:backup-pre-3.0';
+export const KEY_PRE_31 = 'mezzanotte:backup-pre-3.1';
 export const JOURNEY_DAYS = 30;
 export const DEFAULT_PLAN = Object.freeze({ sleep: [4, 5, 5, 6], read: [4, 5, 6, 6] });
 export const EPOCH = '1970-01-01';
@@ -50,13 +53,14 @@ export function createState() {
     journeys: [],
     settings: { sound: false, haptics: true, motion: 'system', reminders: { routine: '23:15', reading: '21:30' } },
     meta: {
-      seen: { achievements: [], level: 1, phases: [], summaries: [], welcome: null },
+      seen: { achievements: [], level: 1, phases: [], summaries: [], goals: [], recaps: [], welcome: null },
       lastOpen: null,
       lastExport: null,
       proposals: {},
       v1MirrorAt: null,
     },
     legacy: null,
+    trial: null,
     migrations: [],
     createdAt: now,
     updatedAt: now,
@@ -241,6 +245,8 @@ export function validateV2(raw) {
   s.meta.seen.achievements = normStringList(seen.achievements);
   s.meta.seen.phases = normStringList(seen.phases);
   s.meta.seen.summaries = normStringList(seen.summaries);
+  s.meta.seen.goals = normStringList(seen.goals);
+  s.meta.seen.recaps = normStringList(seen.recaps);
   s.meta.seen.level = Number.isInteger(seen.level) && seen.level > 0 ? seen.level : 1;
   s.meta.seen.welcome = typeof seen.welcome === 'string' ? seen.welcome.slice(0, 20) : null;
   s.meta.lastOpen = D.isValidISO(m.lastOpen) ? m.lastOpen : null;
@@ -254,6 +260,7 @@ export function validateV2(raw) {
     }
   }
   s.legacy = isObj(raw.legacy) ? raw.legacy : null;
+  s.trial = isObj(raw.trial) && isObj(raw.trial.entries) ? raw.trial : null;
   s.migrations = Array.isArray(raw.migrations)
     ? raw.migrations.filter((x) => isObj(x) && Number.isInteger(x.from) && Number.isInteger(x.to)).map((x) => ({ from: x.from, to: x.to, at: typeof x.at === 'string' ? x.at : null }))
     : [];
@@ -337,14 +344,79 @@ export function migrateV1(v1raw, at = nowStamp()) {
 }
 
 // Punto d'ingresso unico: accetta dati in qualsiasi formato supportato.
-export function migrate(raw) {
+export function migrate(raw, at = nowStamp()) {
   if (!isObj(raw)) throw new Error('File non valido.');
   if (raw.app !== APP_ID) throw new Error('Questo file non è un backup di MEZZANOTTE.');
   if (typeof raw.version !== 'number' || raw.version > SCHEMA_VERSION || raw.version < 1) {
     throw new Error('Versione del backup non supportata.');
   }
-  if (raw.version === 1) return migrateV1(raw);
-  return validateV2(raw);
+  let s = raw.version === 1 ? migrateV1(raw, at) : validateV2(raw);
+  if (raw.version < 3) s = migrateOfficialStart(s, at);
+  s.version = SCHEMA_VERSION;
+  return s;
+}
+
+// Migrazione 2 → 3: la sfida ufficiale inizia il 30 novembre 2026.
+// Le registrazioni precedenti (giorni di prova), i percorsi di prova e le abitudini create durante la prova
+// vengono spostati in "trial": esclusi da percorso, XP e statistiche, ma mai cancellati.
+export function migrateOfficialStart(state, at = nowStamp(), start = OFFICIAL_START) {
+  const trialEntries = {};
+  const entries = {};
+  let moved = 0;
+  for (const [hid, map] of Object.entries(state.entries)) {
+    entries[hid] = {};
+    for (const [iso, e] of Object.entries(map)) {
+      if (iso < start) {
+        (trialEntries[hid] = trialEntries[hid] || {})[iso] = e;
+        moved++;
+      } else entries[hid][iso] = e;
+    }
+  }
+  const trialHabits = [];
+  const habits = state.habits.map((h) => {
+    if (h.id === 'sleep' || h.id === 'read' || h.since >= start) return h;
+    trialHabits.push(h.id);
+    return { ...h, archivedAt: h.archivedAt && h.archivedAt < start ? h.archivedAt : D.addDays(start, -1) };
+  });
+  const hadData = moved > 0 || state.journeys.length > 0;
+  const prevTrial = state.trial && isObj(state.trial.entries) ? state.trial : null;
+  if (prevTrial) {
+    for (const [hid, map] of Object.entries(prevTrial.entries)) trialEntries[hid] = { ...map, ...(trialEntries[hid] || {}) };
+  }
+  const trial = hadData || prevTrial
+    ? {
+        entries: trialEntries,
+        journeys: [...(prevTrial?.journeys || []), ...state.journeys.filter((j) => j.start < start)],
+        habits: [...new Set([...(prevTrial?.habits || []), ...trialHabits])],
+        archivedAt: prevTrial?.archivedAt || at,
+      }
+    : null;
+  const keep = state.journeys.filter((j) => j.start >= start);
+  const journeys = keep.length ? keep : (state.journeys.length ? [{ id: 1, start, plan: { ...DEFAULT_PLAN, sleep: [...DEFAULT_PLAN.sleep], read: [...DEFAULT_PLAN.read] }, adjust: {}, endedAt: null }] : []);
+  const out = validateV2({
+    ...state,
+    habits,
+    entries,
+    journeys: journeys.map((j, i) => ({ ...j, id: i + 1 })),
+    trial,
+    meta: {
+      ...state.meta,
+      seen: { achievements: [], level: 1, phases: [], summaries: [], goals: [], recaps: [], welcome: state.journeys.length ? null : state.meta.seen.welcome },
+      proposals: {},
+      lastOpen: null,
+    },
+    migrations: [...state.migrations, { from: 2, to: 3, at }],
+  });
+  out.version = SCHEMA_VERSION;
+  return out;
+}
+
+export function trialSummary(state) {
+  if (!state.trial) return null;
+  const days = new Set();
+  for (const map of Object.values(state.trial.entries)) for (const iso of Object.keys(map)) days.add(iso);
+  const list = [...days].sort();
+  return { days: list.length, from: list[0] || null, to: list[list.length - 1] || null };
 }
 
 // Copia compatibile con l'app 1.x: permette di tornare alla versione precedente senza perdere i progressi.
@@ -378,10 +450,11 @@ export function mergeNewerV1(state, v1raw) {
   let v1;
   try { v1 = validateV1(v1raw); } catch { return { state, merged: false }; }
   const entries = JSON.parse(JSON.stringify(state.entries));
-  applyV1Days(entries, v1.days);
+  const from = state.journeys[0]?.start || OFFICIAL_START;
+  applyV1Days(entries, Object.fromEntries(Object.entries(v1.days).filter(([iso]) => iso >= from)));
   let next = { ...state, entries };
   const cur = next.journeys[next.journeys.length - 1];
-  if (v1.start && (!cur || cur.start !== v1.start)) next = setJourneyStart(next, v1.start);
+  if (v1.start && v1.start >= from && (!cur || cur.start !== v1.start)) next = setJourneyStart(next, v1.start);
   return { state: validateV2({ ...next, meta: { ...next.meta, v1MirrorAt: stamp } }), merged: true };
 }
 

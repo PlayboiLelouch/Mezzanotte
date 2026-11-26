@@ -29,14 +29,13 @@ export function buildMessages(state, c, now = new Date()) {
   const sleep = habitById(state, 'sleep');
   const read = habitById(state, 'read');
   const hour = now.getHours();
-  const isEvening = hour >= 21 || hour < D.DAY_CUTOFF_HOUR;
   const sleepToday = sleep ? status(state, sleep, today, today) : null;
   const readToday = read ? status(state, read, today, today) : null;
   const yesterday = D.addDays(today, -1);
 
   if (c.journeyState === 'upcoming') {
     const n = D.diffDays(today, c.journey.start);
-    add(100, 'upcoming', `Il percorso inizia ${n === 1 ? 'domani' : `tra ${n} giorni`}. Puoi già registrare la lettura di oggi.`, 'flag');
+    add(100, 'upcoming', `Il percorso inizia ${n === 1 ? 'domani' : `tra ${n} giorni`}: fino ad allora nulla viene conteggiato.`, 'flag');
     return out;
   }
 
@@ -66,7 +65,7 @@ export function buildMessages(state, c, now = new Date()) {
           : hid === 'read' ? 'Ti manca una sola lettura per raggiungere l\'obiettivo settimanale.'
             : `Ti manca un solo giorno di ${h.name.toLowerCase()} per l'obiettivo della settimana.`, 'target', hid);
       } else if (cur.daysLeft <= 2 && cur.daysLeft > 0) {
-        add(85, `last-days-${hid}`, `Ultimi ${cur.daysLeft === 1 ? 'giorno' : `${cur.daysLeft} giorni`} della fase ${name}: per l'obiettivo servono ancora ${noun(hid, hp.remaining, h.name)}.`, 'target', hid);
+        add(85, `last-days-${hid}`, `${cur.daysLeft === 1 ? 'Ultimo giorno' : `Ultimi ${cur.daysLeft} giorni`} della fase ${name}: per l'obiettivo ${hp.remaining === 1 ? 'serve' : 'servono'} ancora ${noun(hid, hp.remaining, h.name).replace('una sola', 'una')}.`, 'target', hid);
       }
     }
 
@@ -80,7 +79,7 @@ export function buildMessages(state, c, now = new Date()) {
     for (const [hid, hp] of Object.entries(cur.habits)) {
       if (hp.ok || hp.possible) continue;
       const pct = c.consistency.week !== null ? Math.round(c.consistency.week * 100) : null;
-      add(40, `unreachable-${hid}`, `L'obiettivo ${hid === 'sleep' ? 'del sonno' : hid === 'read' ? 'di lettura' : ''} di questa settimana è fuori portata, ma ogni giorno fatto conta per la costanza${pct !== null ? ` (ora ${pct}%)` : ''}.`, 'heart');
+      add(40, `unreachable-${hid}`, `Obiettivo ${hid === 'sleep' ? 'del sonno' : hid === 'read' ? 'di lettura' : ''} fuori portata questa settimana: ogni giorno fatto conta comunque per la costanza${pct !== null ? ` (${pct}%)` : ''}.`, 'heart');
     }
 
     // minuti di lettura della settimana
@@ -102,18 +101,12 @@ export function buildMessages(state, c, now = new Date()) {
   if (missedYesterday && c.metrics.habitDone > 0) {
     const n = c.metrics.sleepDone;
     const r = c.metrics.readDone;
-    add(75, 'after-miss', `Una giornata saltata non annulla quello che hai costruito: ${n} ${D.plural(n, 'notte', 'notti')} in orario e ${r} ${D.plural(r, 'lettura', 'letture')} finora.`, 'heart');
+    add(75, 'after-miss', `Un giorno saltato non cancella nulla: ${n} ${D.plural(n, 'notte', 'notti')} in orario e ${r} ${D.plural(r, 'lettura', 'letture')} finora. Si riparte da oggi.`, 'heart');
   }
 
   // sabato
   if (sleep && sleep.config.freeWeekdays.includes(D.weekday(today))) {
-    add(72, 'saturday', readToday === 'done' ? 'Sabato sera libero e lettura già fatta: giornata completa.' : 'Stasera il sonno è libero. La lettura conta come sempre.', 'moon', 'sleep');
-  }
-
-  // sera: preparazione alla routine
-  if (isEvening && sleepToday === 'pending' && hour >= 21 && hour < 23) {
-    const m = D.timeToMinutes(state.settings.reminders.routine) - (hour * 60 + now.getMinutes());
-    if (m > 0 && m <= 120) add(80, 'routine-soon', `Tra ${D.formatDuration(m)} niente nuovi lavori: è l'inizio della routine serale.`, 'clock', 'sleep');
+    add(92, 'saturday', readToday === 'done' ? 'Sabato sera libero e lettura già fatta: giornata completa.' : 'Stasera il sonno è libero. La lettura conta come sempre.', 'moon', 'sleep');
   }
 
   // orario medio in miglioramento
@@ -143,8 +136,11 @@ export function buildMessages(state, c, now = new Date()) {
     add(10, 'week-status', `Questa settimana: ${s.done} ${D.plural(s.done, 'notte', 'notti')} su ${s.target} e ${r.done} ${D.plural(r.done, 'lettura', 'letture')} su ${r.target}.`, 'chart');
   }
 
+  // il sabato sera è libero: nessuna pressione sull'orario del sonno
+  const freeTonight = sleep && sleep.config.freeWeekdays.includes(D.weekday(today));
+  const list = freeTonight ? out.filter((m) => !/(^|-)sleep$/.test(m.id) || m.id === 'sleep-streak' || m.id === 'goal-sleep') : out;
   // ordine: priorità, poi variazione stabile nel giorno tra messaggi di pari peso
-  return out.sort((x, y) => y.priority - x.priority || (hash(today + x.id) % 7) - (hash(today + y.id) % 7));
+  return list.sort((x, y) => y.priority - x.priority || (hash(today + x.id) % 7) - (hash(today + y.id) % 7));
 }
 
 export function topMessage(state, c, now = new Date()) {

@@ -6,8 +6,9 @@ import * as M from './messages.js';
 import * as V from './views.js';
 import * as FX from './fx.js';
 import { I } from './icons.js';
+import { medalDefs } from './medals.js';
 
-const VERSION = '3.0.0';
+const VERSION = '3.1.0';
 const TIMER_KEY = 'mezzanotte:timer';
 const KEY_BEFORE_RESET = 'mezzanotte:backup-prima-del-reset';
 
@@ -71,7 +72,14 @@ async function loadState() {
   let s = null;
   let source = 'new';
   const v2 = lsGet(S.KEY_V2) || (await idb.get(S.KEY_V2));
-  if (v2) { s = tryParse(v2); if (s) source = 'v2'; }
+  if (v2) {
+    s = tryParse(v2);
+    if (s) {
+      source = 'v2';
+      // dati della 3.0 (schema 2): copia intatta prima dell'avvio ufficiale della 3.1
+      try { if (JSON.parse(v2).version < 3) await keepCopy(S.KEY_PRE_31, v2); } catch { /* ignora */ }
+    }
+  }
   const v1 = lsGet(S.KEY_V1) || (await idb.get(S.KEY_V1));
   if (!s && v1) {
     s = tryParse(v1);
@@ -208,8 +216,18 @@ function markAllSeen() {
       achievements: c.achievements.filter((a) => a.unlocked).map((a) => a.id),
       level: Math.max(state.meta.seen.level, c.level.n),
       phases: c.blocks.filter((b) => b.phase && b.achieved && b.timing !== 'future').map((b) => b.key),
+      goals: [...goalKeys(), ...E.readingMilestone(c.read.totalMinutes).reached.map((m) => `lettura:${m}`)],
     },
   });
+}
+
+function goalKeys() {
+  const out = [];
+  for (const b of c.blocks) {
+    if (b.timing === 'future') continue;
+    for (const [hid, hp] of Object.entries(b.habits)) if (hp.ok) out.push(`${b.key}:${hid}`);
+  }
+  return out;
 }
 
 function celebrate() {
@@ -220,19 +238,33 @@ function celebrate() {
   const levelUp = c.level.n > seen.level ? c.level.n : null;
   const j = c.journey;
   const summary = j && c.journeyState === 'completed' && !seen.summaries.includes(String(j.id));
-  if (!phases.length && !achs.length && !levelUp && !summary) return;
+  const goals = goalKeys().filter((k) => !seen.goals.includes(k));
+  const phaseKeys = new Set(phases.map((b) => b.key));
+  const milestones = E.readingMilestone(c.read.totalMinutes).reached.filter((m) => !seen.goals.includes(`lettura:${m}`));
+  if (!phases.length && !achs.length && !levelUp && !summary && !goals.length && !milestones.length) return;
   state = S.setMeta(state, {
     seen: {
       phases: [...seen.phases, ...phases.map((b) => b.key)],
       achievements: [...seen.achievements, ...achs.map((a) => a.id)],
       level: Math.max(seen.level, c.level.n),
       summaries: summary ? [...seen.summaries, String(j.id)] : seen.summaries,
+      goals: [...seen.goals, ...goals, ...milestones.map((m) => `lettura:${m}`)],
     },
   });
   save();
+  // obiettivo settimanale di una singola abitudine: animazione dedicata (se la fase intera è completata, c'è già la sua schermata)
+  for (const k of goals) {
+    const bkey = k.slice(0, k.lastIndexOf(':'));
+    const hid = k.slice(k.lastIndexOf(':') + 1);
+    if (phaseKeys.has(bkey)) continue;
+    const b = c.blocks.find((x) => x.key === bkey);
+    const h = S.habitById(state, hid);
+    if (b && h) toastQueue.push({ cls: 'goal-toast', html: V.goalToast(h, b.habits[hid]), action: 'open-week', key: bkey });
+  }
+  for (const m of milestones.slice(-1)) toastQueue.push({ cls: 'goal-toast', html: V.milestoneToast(m) });
   for (const b of phases) overlayQueue.push({ cls: 'ov-phase-wrap', html: V.overlayPhase(state, b), fx: 'full' });
   if (levelUp) overlayQueue.push({ cls: 'ov-level-wrap', html: V.overlayLevel(c, levelUp), fx: 'level' });
-  for (const a of achs) toastQueue.push(a);
+  for (const a of achs) toastQueue.push({ html: V.achievementToast(a), action: 'open-achievement', id: a.id });
   if (summary) overlayQueue.push({ sheet: { type: 'summary', journey: j.id } });
   nextOverlay();
   nextAchToast();
@@ -271,14 +303,15 @@ function nextOverlay() {
 
 function nextAchToast() {
   if (achToastOpen || overlayOpen || !toastQueue.length) return;
-  const a = toastQueue.shift();
+  const t = toastQueue.shift();
   achToastOpen = true;
   const el = document.createElement('button');
-  el.className = 'ach-toast';
+  el.className = `ach-toast ${t.cls || ''}`;
   el.setAttribute('role', 'status');
-  el.dataset.action = 'open-achievement';
-  el.dataset.id = a.id;
-  el.innerHTML = V.achievementToast(a);
+  if (t.action) el.dataset.action = t.action;
+  if (t.id) el.dataset.id = t.id;
+  if (t.key) el.dataset.key = t.key;
+  el.innerHTML = t.html;
   document.body.appendChild(el);
   requestAnimationFrame(() => el.classList.add('show'));
   FX.haptic('success');
@@ -331,7 +364,15 @@ function render() {
 
 function afterRender() {
   const xpEl = document.querySelector('#view-today.active [data-xp]');
-  if (xpEl && ui.lastXp !== null && ui.lastXp !== c.xp.total) FX.countUp(xpEl, ui.lastXp, c.xp.total, V.nf);
+  if (xpEl && ui.lastXp !== null && ui.lastXp !== c.xp.total) {
+    FX.countUp(xpEl, ui.lastXp, c.xp.total, V.nf);
+    if (c.xp.total > ui.lastXp && !FX.reducedMotion()) {
+      const head = document.querySelector('#view-today .today-head');
+      head?.classList.remove('bump');
+      void head?.offsetWidth;
+      head?.classList.add('bump');
+    }
+  }
   ui.lastXp = c.xp.total;
   if (ui.pop) {
     const [habit, iso] = ui.pop.split(':');
@@ -399,6 +440,7 @@ function renderSheet() {
   else if (s.type === 'catchup') html = V.sheetCatchup(x);
   else if (s.type === 'install') html = V.sheetInstall(x);
   else if (s.type === 'whats-new') html = V.sheetWhatsNew(x);
+  else if (s.type === 'week') html = V.sheetWeek(x, s.key);
   else if (s.type === 'summary') {
     const j = state.journeys.find((y) => y.id === s.journey) || c.journey;
     html = V.sheetSummary(x, E.journeySummary(state, j, today));
@@ -647,6 +689,18 @@ const actions = {
     record('read', iso, { min: cur >= goal ? null : goal }, el);
   },
   'catchup-done': () => { ui.away = null; closeSheet(); },
+  // dopo mezzanotte: l'orario reale viene associato alla notte giusta (il giorno logico, fino alle 5:00)
+  'bed-now': (el) => {
+    const iso = el.dataset.iso;
+    const bed = D.nowTime(new Date());
+    record('sleep', iso, { bed }, el, { undo: true, label: `A letto alle ${bed}: registrato sulla notte di ${D.WEEKDAYS_LONG[D.weekday(iso)]}` });
+  },
+  'open-week': (el) => openSheet({ type: 'week', key: el.dataset.key }),
+  'recap-dismiss': (el) => {
+    state = S.setMeta(state, { seen: { ...state.meta.seen, recaps: [...state.meta.seen.recaps, el.dataset.key] } });
+    save();
+    render();
+  },
   'open-catchup': () => openSheet({ type: 'catchup' }),
   'away-dismiss': () => { ui.away = null; render(); },
   // timer
@@ -901,6 +955,15 @@ function tick() {
   document.querySelectorAll('[data-countdown]').forEach((n) => {
     n.textContent = mins === null ? 'Mezzanotte è passata: chiudi tutto e vai a dormire' : `Mancano ${D.formatDuration(mins)} a mezzanotte`;
   });
+  document.querySelectorAll('[data-routine]').forEach((n) => { n.textContent = V.routineText(now); });
+  document.querySelectorAll('[data-prep-line]').forEach((n) => {
+    const txt = V.prepLine(Math.max(0, Math.ceil((Number(n.dataset.prepLine) - now) / 60000)));
+    if (n.textContent !== txt) n.textContent = txt;
+  });
+  document.querySelectorAll('[data-prep]').forEach((n) => {
+    const html = V.prepCount(Math.max(0, Math.ceil((Number(n.dataset.prep) - now) / 60000)));
+    if (n.innerHTML !== html) n.innerHTML = html;
+  });
   const t = getTimer();
   if (t) {
     const ms = timerElapsed(t);
@@ -949,6 +1012,11 @@ function registerSW() {
 async function boot() {
   const { s, source } = await loadState();
   state = s;
+  document.querySelector('#svg-defs defs')?.insertAdjacentHTML('beforeend', medalDefs());
+  // un timer avviato prima dell'inizio del percorso non può contare: viene chiuso senza effetti
+  const ts = E.trackingStart(state);
+  const tmr = getTimer();
+  if (tmr && (!ts || tmr.iso < ts)) setTimer(null);
   FX.configure(state.settings);
   shell();
   document.addEventListener('click', (e) => {
@@ -966,7 +1034,7 @@ async function boot() {
     compute();
     // rientro dopo qualche giorno: messaggio positivo e possibilità di recuperare
     const last = state.meta.lastOpen;
-    if (last && D.diffDays(last, today) >= 3) {
+    if (last && D.diffDays(last, today) >= 3 && E.journeyState(state.journeys[state.journeys.length - 1], today) !== 'upcoming') {
       const ts = E.trackingStart(state);
       const from = D.maxISO(D.maxISO(last, D.addDays(today, -7)), ts);
       const days = from <= D.addDays(today, -1) ? D.rangeISO(from, D.addDays(today, -1)).filter((d) => {

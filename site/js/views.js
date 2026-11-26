@@ -3,6 +3,7 @@ import * as D from './core.js';
 import * as S from './store.js';
 import * as E from './engine.js';
 import { I } from './icons.js';
+import { medal } from './medals.js';
 
 export const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch]);
 export const cap = (s) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : s);
@@ -58,6 +59,16 @@ function countdown(now) {
   return `Mancano ${D.formatDuration(D.minutesToMidnight(now))} a mezzanotte`;
 }
 
+// Testo contestuale della routine serale (aggiornato ogni secondo dall'orologio dell'app).
+export function routineText(now) {
+  const m = now.getHours() * 60 + now.getMinutes();
+  if (now.getHours() < D.DAY_CUTOFF_HOUR) return 'Registra l\'orario quando vai a letto';
+  if (m < 23 * 60 + 15) return `Routine serale tra ${D.formatDuration(23 * 60 + 15 - m)}`;
+  if (m < 23 * 60 + 30) return 'Routine iniziata: da ora niente nuovi lavori';
+  if (m < 23 * 60 + 45) return 'Chiudi i progetti e annota da dove ripartire';
+  return `Preparati per dormire · ${D.formatDuration(D.minutesToMidnight(now))} a mezzanotte`;
+}
+
 const ROUTINE = [
   { t: '23:15', label: 'Niente nuovi lavori' },
   { t: '23:30', label: 'Chiudi i progetti' },
@@ -77,7 +88,7 @@ export function showRoutine(ctx, h, iso, st) {
   const { now, today } = ctx;
   if (!h.config.routine || iso !== today || st !== 'pending') return false;
   const m = now.getHours() * 60 + now.getMinutes();
-  return m >= 22 * 60 + 30 || m < 60;
+  return m >= 22 * 60 + 30;
 }
 
 function checkBtn(h, iso, done, label) {
@@ -92,11 +103,12 @@ function sleepCard(ctx, h) {
   const e = state.entries.sleep[iso] || {};
   const when = iso === today ? (D.isSaturday(iso) ? 'sabato sera' : 'stanotte') : 'ieri sera';
   let sub;
-  if (st === 'free') sub = 'Sera libera: non conta e non interrompe la serie';
+  const afterMidnight = iso === today && now.getHours() < D.DAY_CUTOFF_HOUR;
+  if (st === 'free') sub = 'Sera libera: nessun orario da rispettare';
   else if (st === 'done') sub = `${e.bed ? `A letto alle ${e.bed}` : 'Entro mezzanotte'}${e.hours ? ` · ${D.formatHours(e.hours)} di sonno` : ''}`;
   else if (st === 'missed') sub = `${e.bed ? `A letto alle ${e.bed}` : 'Dopo mezzanotte'}${e.hours ? ` · ${D.formatHours(e.hours)} di sonno` : ''}`;
   else if (iso !== today) sub = 'Sei andato a letto entro mezzanotte?';
-  else if (now.getHours() >= 21 || now.getHours() < D.DAY_CUTOFF_HOUR) sub = `<span data-countdown>${countdown(now)}</span>`;
+  else if (now.getHours() >= 17 || afterMidnight) sub = `<span data-routine>${routineText(now)}</span>`;
   else sub = `A letto entro le ${h.config.deadline} · routine dalle 23:15`;
 
   // notte di ieri ancora da registrare, mostrata nel pomeriggio come promemoria compatto
@@ -105,12 +117,18 @@ function sleepCard(ctx, h) {
   const yRow = ys === 'pending'
     ? `<div class="h-yesterday"><span>Ieri sera?</span><button data-action="sleep-set" data-iso="${y}" data-val="1" class="mini on">Entro mezzanotte</button><button data-action="sleep-set" data-iso="${y}" data-val="0" class="mini">Dopo</button></div>`
     : '';
+  // dopo mezzanotte il tocco principale registra l'orario reale sulla notte giusta (quella di ieri sera)
+  const bedNow = afterMidnight && st === 'pending';
   const right = st === 'free'
     ? '<span class="free-pill">Libera</span>'
-    : checkBtn(h, iso, st === 'done', 'A letto entro mezzanotte');
+    : bedNow
+      ? `<button class="bed-now" data-action="bed-now" data-iso="${iso}">${I.moon}A letto ora</button>`
+      : checkBtn(h, iso, st === 'done', 'A letto entro mezzanotte');
   const actions = st === 'free'
     ? `<button class="h-act" data-action="open-day" data-iso="${iso}" data-focus="sleep">Registra comunque</button>`
-    : `${st === 'pending' ? `<button class="h-act" data-action="sleep-set" data-iso="${iso}" data-val="0">Dopo mezzanotte</button>` : ''}
+    : bedNow
+      ? `<button class="h-act" data-action="open-day" data-iso="${iso}" data-focus="sleep">Ero a letto prima</button>`
+      : `${st === 'pending' ? `<button class="h-act" data-action="sleep-set" data-iso="${iso}" data-val="0">Dopo mezzanotte</button>` : ''}
        <button class="h-act" data-action="open-day" data-iso="${iso}" data-focus="sleep">${st === 'done' || st === 'missed' ? 'Modifica' : 'Orario e ore'}</button>`;
   return `<article class="habit c-sleep ${st === 'done' ? 'is-done' : ''} ${st === 'free' ? 'is-free' : ''}" data-card="sleep" data-status="${st}">
     <div class="h-row">
@@ -242,8 +260,85 @@ function welcomeBack(ctx) {
   </section>`;
 }
 
+function nextRow(ctx) {
+  const a = nextAchievement(ctx.c);
+  if (!a) return '';
+  return `<button class="next-row" data-action="open-achievement" data-id="${a.id}">${medal(a, 40)}
+    <span class="nr-text"><small>Prossimo traguardo</small><b>${esc(a.title)}</b></span>
+    <span class="nr-num">${nf(a.value)}<small>/${nf(a.target)}</small></span></button>`;
+}
+
+function recapCard(ctx) {
+  const { c, state, today } = ctx;
+  const cur = c.current;
+  if (!cur) return '';
+  const i = c.blocks.indexOf(cur);
+  const prev = c.blocks[i - 1];
+  if (!prev || prev.timing !== 'past' || prev.journeyId !== cur.journeyId) return '';
+  if (D.diffDays(cur.from, today) > 2 || state.meta.seen.recaps.includes(prev.key)) return '';
+  const parts = Object.entries(prev.habits).map(([hid, hp]) => `${hp.done}/${hp.target} ${unit(S.habitById(state, hid), hp.target)}`);
+  return `<section class="recap surface ${prev.achieved ? 'won' : ''}">
+    <button class="recap-x" data-action="recap-dismiss" data-key="${prev.key}" aria-label="Nascondi">${I.x}</button>
+    <div class="p-head"><span class="p-icon ${prev.achieved ? 'gold' : ''}">${prev.achieved ? I.trophy : I.chart}</span><b>${blockLabel(prev)}: ${prev.achieved ? 'obiettivi raggiunti' : 'com\'è andata'}</b></div>
+    <p>${parts.join(' · ')} · +${nf(E.blockXp(state, prev, today))} XP</p>
+    <button class="btn btn-small btn-ghost" data-action="open-week" data-key="${prev.key}">Vedi il riepilogo</button>
+  </section>`;
+}
+
+function viewPrep(ctx) {
+  const { state, c, today, now } = ctx;
+  const j = c.journey;
+  const n = D.diffDays(today, j.start);
+  const startDate = D.parseISO(j.start);
+  startDate.setHours(D.DAY_CUTOFF_HOUR, 0, 0, 0);
+  const mins = Math.max(0, Math.round((startDate - now) / 60000));
+  const plan = c.blocks.filter((b) => b.journeyId === j.id && b.kind !== 'maintenance');
+  const book = S.habitById(state, 'read').config.book;
+  return `<header class="page-head"><div><div class="eyebrow">${cap(D.formatDateLong(today))}</div><h1 class="large-title">${n === 1 ? 'Si parte domani' : `Si parte ${D.WEEKDAYS_LONG[D.weekday(j.start)]}`}</h1></div></header>
+    <section class="prep surface">
+      <div class="prep-count" data-prep="${startDate.getTime()}">${prepCount(mins)}</div>
+      <div class="prep-text"><b>Giorno 1: ${D.formatDateLong(j.start)}</b><span class="live" data-prep-line="${startDate.getTime()}">${prepLine(mins)}</span><span>La prima giornata inizia alle 5:00 di lunedì.</span></div>
+      <p class="prep-note">Fino ad allora nulla viene conteggiato: niente errori, niente assenze. È il momento di preparare il terreno.</p>
+    </section>
+    <div class="section-head"><h2>Le tue due abitudini</h2></div>
+    <div class="intro">
+      <div class="intro-h c-sleep"><span class="h-icon">${I.moon}</span><div><b>A letto entro mezzanotte</b><span>Obiettivo: 4 → 5 → 5 → 6 notti su 6. Il sabato sera è libero. Conta quando vai a letto, non quando ti addormenti.</span></div></div>
+      <div class="intro-h c-read"><span class="h-icon">${I.book}</span><div><b>Almeno 5 minuti di lettura</b><span>Obiettivo: 4 → 5 → 6 → 6 giorni su 7. Un tocco o il timer: conta solo la lettura vera.</span></div></div>
+    </div>
+    <div class="section-head"><h2>Il percorso</h2><span>${D.formatRange(j.start, E.journeyEnd(j))}</span></div>
+    <div class="list">${plan.map((b) => `<div class="list-item plan-row"><span class="pr-n">${b.phase <= 4 ? b.phase : I.mountain}</span><span class="lbl">${b.phase <= 4 ? `Fase ${b.phase} · ` : ''}${E.PHASES[b.phase - 1].name}<small>${D.formatRange(b.from, b.to)}</small></span><span class="val">${b.targets.sleep}+${b.targets.read}</span></div>`).join('')}</div>
+    <p class="foot">Il numero a destra indica notti in orario + giorni di lettura richiesti.</p>
+    <div class="section-head"><h2>Prepara il terreno</h2></div>
+    <div class="list">
+      <button class="list-item" data-action="open-habit" data-id="read"><span class="li-icon c-read">${I.book}</span><span class="lbl">Scegli il libro<small>${book ? esc(book) : 'Tienilo vicino al letto'}</small></span>${I.chevR}</button>
+      <button class="list-item" data-action="open-reminders"><span class="li-icon c-sky">${I.bell}</span><span class="lbl">Imposta i promemoria di iOS<small>Rilassamento alle 23:15 e lettura</small></span>${I.chevR}</button>
+    </div>`;
+}
+
+// Conto alla rovescia unico: numero grande + resto (es. "3 giorni" · "e 11 h 24 min").
+export function prepCount(mins) {
+  const d = Math.floor(mins / 1440);
+  const h = Math.floor((mins % 1440) / 60);
+  const m = mins % 60;
+  if (mins <= 0) return '<b>0</b><span>si parte</span>';
+  if (d) return `<b>${d}</b><span>${D.plural(d, 'giorno', 'giorni')}</span>`;
+  if (h) return `<b>${h}</b><span>${D.plural(h, 'ora', 'ore')}</span>`;
+  return `<b>${m}</b><span>minuti</span>`;
+}
+
+export function prepLine(mins) {
+  const d = Math.floor(mins / 1440);
+  const h = Math.floor((mins % 1440) / 60);
+  const m = mins % 60;
+  if (mins <= 0) return 'Si comincia adesso';
+  if (d) return `Mancano ${d} ${D.plural(d, 'giorno', 'giorni')}, ${h} h e ${String(m).padStart(2, '0')} min`;
+  if (h) return `Mancano ${h} h e ${String(m).padStart(2, '0')} min`;
+  return `Mancano ${m} min`;
+}
+
 export function viewToday(ctx) {
   const { state, c, today, ui } = ctx;
+  if (c.journeyState === 'upcoming') return viewPrep(ctx);
   // al rientro dopo qualche giorno il messaggio principale è un bentornato positivo
   const message = ui.away
     ? { tone: 'gold', icon: 'sunrise', text: `Bentornato. Quello che hai costruito è ancora qui: ${nf(c.xp.total)} XP e livello ${c.level.n}, ${c.level.title}.` }
@@ -266,12 +361,13 @@ export function viewToday(ctx) {
       <div class="xp-line"><span><b>Livello ${c.level.n}</b> · ${esc(c.level.title)}</span><span class="xp-num"><b data-xp>${nf(c.xp.total)}</b> / ${nf(c.level.next)} XP</span></div>
       ${bar('xp-today', c.level.progress, 'fill-gold')}
     </header>
-    ${message ? `<p class="insight t-${message.tone}"><span>${icon(message.icon)}</span>${esc(message.text)}</p>` : ''}
+    ${message ? `<p class="insight t-${message.tone}"><span>${icon(message.icon)}</span><span class="insight-text">${esc(message.text)}</span></p>` : ''}
     ${endCard}
     <div class="section-head"><h2>Oggi</h2><span class="${doneToday.complete ? 'gold-txt' : ''}">${doneToday.complete ? `${I.check}Giornata completa` : `${doneToday.done} di ${doneToday.total}`}</span></div>
     <div class="habits">${habits.map((h) => habitCard(ctx, h)).join('')}</div>
-    ${welcomeBack(ctx)}${prop}
-    ${weekCard(ctx)}`;
+    ${welcomeBack(ctx)}${recapCard(ctx)}${prop}
+    ${weekCard(ctx)}
+    ${nextRow(ctx)}`;
 }
 
 // ---------- OBIETTIVI ----------
@@ -295,10 +391,10 @@ function phaseRow(ctx, b) {
     <div class="ph-goals">${goals}${st === 'done' ? '<span class="pg gold">Completata</span>' : ''}</div>${detail}</div></li>`;
 }
 
-function achievementBadge(a, size = 64) {
-  return `<span class="badge ${a.unlocked ? 'on' : ''}" style="--s:${size}px">
-    ${a.unlocked ? '' : `<svg viewBox="0 0 ${size} ${size}">${ring(`ach-${a.id}`, size, 3, a.ratio, 'dim')}</svg>`}
-    <span class="badge-icon">${icon(a.icon)}</span></span>`;
+const achievementBadge = (a, size = 64) => medal(a, size);
+
+export function nextAchievement(c) {
+  return c.achievements.filter((a) => !a.unlocked).sort((a, b) => b.ratio - a.ratio || a.target - b.target)[0] || null;
 }
 
 export function viewGoals(ctx) {
@@ -308,6 +404,7 @@ export function viewGoals(ctx) {
   const day = c.journeyState === 'active' ? c.journeyDay : c.journeyState === 'upcoming' ? 0 : 30;
   const statusTxt = { upcoming: `Inizia ${D.formatDateLong(j.start)}`, active: `Giorno ${c.journeyDay} di 30`, completed: 'Completato', ended: 'Concluso' }[c.journeyState];
   const next = c.achievements.filter((a) => !a.unlocked).sort((a, b) => b.ratio - a.ratio || a.target - b.target);
+  // gli obiettivi raggiunti si contano per abitudine e settimana: 2 a settimana + 2 nel bilancio
   const nextA = next[0];
   const locked = next.slice(1, 4);
   const ended = c.journeyState === 'completed' || c.journeyState === 'ended';
@@ -315,9 +412,11 @@ export function viewGoals(ctx) {
   const habits = E.visibleHabits(state, today);
   return `${header(`Percorso ${j.id}`, 'Obiettivi')}
     <section class="journey surface">
-      <div class="j-top"><div><div class="j-title">${statusTxt}</div><div class="muted small">${D.formatRange(j.start, E.journeyEnd(j))}</div></div>
-        <div class="j-pct"><b>${Math.round((day / 30) * 100)}</b><small>%</small></div></div>
-      ${bar('journey', day / 30, 'fill-gold')}
+      <div class="j-top"><div><div class="j-title">${statusTxt}</div><div class="muted small">${D.formatRange(j.start, E.journeyEnd(j))}</div></div></div>
+      <div class="j-metrics">
+        <div class="jm"><span class="jm-k">Tempo trascorso</span><span class="jm-v">${day}<small> / 30 giorni</small></span>${bar('journey-time', day / 30, 'fill-time')}</div>
+        <div class="jm"><span class="jm-k">Obiettivi raggiunti</span><span class="jm-v gold-txt">${c.journeyGoals.done}<small> / ${c.journeyGoals.total}</small></span>${bar('journey-goals', c.journeyGoals.total ? c.journeyGoals.done / c.journeyGoals.total : 0, 'fill-gold')}</div>
+      </div>
       ${ended ? `<button class="btn btn-primary" style="margin-top:16px" data-action="open-summary" data-journey="${j.id}">Il tuo bilancio</button>` : ''}
       <ol class="phases">${jb.map((b) => phaseRow(ctx, b)).join('')}</ol>
     </section>
@@ -344,13 +443,14 @@ export function habitRule(h, today) {
 function bedChart(ctx) {
   const { state, today } = ctx;
   const W = 330, H = 168, L = 40, R = 8, T = 12, B = 22;
-  const from = D.addDays(today, -29);
+  const from = D.maxISO(D.addDays(today, -29), E.trackingStart(state) || today);
   const dates = D.rangeISO(from, today);
+  const span = Math.max(dates.length - 1, 13);
   const minOff = -150, maxOff = 120;
-  const x = (i) => L + (i / (dates.length - 1)) * (W - L - R);
+  const x = (i) => L + (i / span) * (W - L - R);
   const y = (off) => T + ((Math.min(maxOff, Math.max(minOff, off)) - minOff) / (maxOff - minOff)) * (H - T - B);
   const pts = dates.map((d, i) => ({ i, d, bed: state.entries.sleep[d]?.bed })).filter((p) => p.bed);
-  if (pts.length < 2) return '<p class="chart-empty">Registra l\'orario in cui vai a letto (facoltativo) per vedere l\'andamento delle ultime 4 settimane.</p>';
+  if (pts.length < 3) return `<p class="chart-empty">Il grafico degli orari compare dopo 3 notti con l'orario registrato${pts.length ? ` (ora ${pts.length})` : ''}. L'orario è facoltativo.</p>`;
   const grid = [-120, -60, 0, 60].map((o) => `<line x1="${L}" x2="${W - R}" y1="${y(o)}" y2="${y(o)}" class="${o === 0 ? 'mid' : 'grid'}"/>
     <text class="chart-label ${o === 0 ? 'mid' : ''}" x="${L - 7}" y="${y(o) + 3.5}" text-anchor="end">${D.offsetToTime(o)}</text>`).join('');
   let path = '';
@@ -360,7 +460,8 @@ function bedChart(ctx) {
     const cls = D.isSaturday(p.d) ? 'sat' : ok ? 'ok' : 'late';
     return `<circle class="pt ${cls}" cx="${x(p.i).toFixed(1)}" cy="${y(D.bedtimeOffset(p.bed)).toFixed(1)}" r="3.6"/>`;
   }).join('');
-  const xl = [0, 14, 29].map((i) => `<text class="chart-label" x="${x(i)}" y="${H - 5}" text-anchor="${i === 0 ? 'start' : i === 29 ? 'end' : 'middle'}">${i === 29 ? 'oggi' : D.formatDayMonth(dates[i])}</text>`).join('');
+  const last = dates.length - 1;
+  const xl = [...new Set([0, last])].map((i) => `<text class="chart-label" x="${x(i)}" y="${H - 5}" text-anchor="${i === 0 ? 'start' : 'end'}">${i === last ? 'oggi' : D.formatDayMonth(dates[i])}</text>`).join('');
   return `<div class="chart"><svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Orari a letto, ultime 4 settimane">${grid}<path d="${path}" class="line-sleep"/>${dots}${xl}</svg></div>`;
 }
 
@@ -368,11 +469,12 @@ function readChart(ctx) {
   const { state, today } = ctx;
   const h = S.habitById(state, 'read');
   const W = 330, H = 150, L = 30, R = 8, T = 12, B = 22;
-  const dates = D.rangeISO(D.addDays(today, -27), today);
+  const dates = D.rangeISO(D.maxISO(D.addDays(today, -27), E.trackingStart(state) || today), today);
   const mins = dates.map((d) => state.entries.read[d]?.min || 0);
-  if (!mins.some((m) => m > 0)) return '<p class="chart-empty">I minuti di lettura delle ultime 4 settimane appariranno qui.</p>';
+  const withMin = mins.filter((m) => m > 0).length;
+  if (withMin < 3) return `<p class="chart-empty">Il grafico della lettura compare dopo 3 giorni con minuti registrati${withMin ? ` (ora ${withMin})` : ''}.</p>`;
   const maxV = Math.max(20, Math.ceil(Math.max(...mins) / 10) * 10);
-  const bw = (W - L - R) / dates.length;
+  const bw = (W - L - R) / Math.max(dates.length, 14);
   const y = (v) => T + (1 - v / maxV) * (H - T - B);
   const ticks = [0, maxV / 2, maxV].map((v) => `<line x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}" class="grid"/><text class="chart-label" x="${L - 7}" y="${y(v) + 3.5}" text-anchor="end">${Math.round(v)}</text>`).join('');
   const goal = E.goalMinOn(h, today);
@@ -384,14 +486,15 @@ function readChart(ctx) {
     const ok = m >= E.goalMinOn(h, dates[i]);
     return `<rect class="${ok ? 'b-read' : 'b-partial'}" x="${(L + i * bw + bw * 0.2).toFixed(1)}" y="${top.toFixed(1)}" width="${(bw * 0.6).toFixed(1)}" height="${hgt.toFixed(1)}" rx="2.5"/>`;
   }).join('');
-  const xl = [0, 14, 27].map((i) => `<text class="chart-label" x="${L + i * bw + bw / 2}" y="${H - 5}" text-anchor="${i === 0 ? 'start' : i === 27 ? 'end' : 'middle'}">${i === 27 ? 'oggi' : D.formatDayMonth(dates[i])}</text>`).join('');
+  const lastI = dates.length - 1;
+  const xl = [...new Set([0, lastI])].map((i) => `<text class="chart-label" x="${L + i * bw + bw / 2}" y="${H - 5}" text-anchor="${i === 0 ? 'start' : 'end'}">${i === lastI ? 'oggi' : D.formatDayMonth(dates[i])}</text>`).join('');
   return `<div class="chart"><svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Minuti di lettura, ultime 4 settimane">${ticks}${goalLine}${bars}${xl}</svg></div>`;
 }
 
 function weeksChart(ctx) {
   const { c } = ctx;
   const list = c.blocks.filter((b) => b.timing !== 'future' && b.consistency !== null).slice(-8);
-  if (!list.length) return '<p class="chart-empty">La costanza di ogni settimana apparirà qui.</p>';
+  if (list.length < 2) return '';
   const W = 330, H = 132, T = 18, B = 22;
   const n = Math.max(list.length, 4);
   const slot = W / n;
@@ -411,8 +514,20 @@ function streakTile(label, s, cls, unitOne, unitMany) {
   return `<div class="tile"><div class="k"><span class="${cls}">${I.flame}</span>${label}</div><div class="v">${s.current}<small>${D.plural(s.current, unitOne, unitMany)}</small></div><div class="s">Migliore: ${s.best}</div></div>`;
 }
 
+export const minLabel = (m) => (m < 60 ? `${m} min` : `${(m / 60).toLocaleString('it-IT', { maximumFractionDigits: 1 })} h`);
+
+function readingLadder(total) {
+  const ms = E.readingMilestone(total);
+  const show = E.READING_MILESTONES.slice(0, Math.max(5, E.READING_MILESTONES.indexOf(ms.next) + 2));
+  return `<div class="ladder">${show.map((m) => `<span class="${total >= m ? 'on' : m === ms.next ? 'next' : ''}">${minLabel(m)}</span>`).join('')}</div>
+    <p class="foot">${ms.next ? `Prossimo traguardo di lettura: ${minLabel(ms.next)} (mancano ${ms.next - total} min).` : 'Tutti i traguardi di lettura raggiunti.'} Contano solo i minuti registrati.</p>`;
+}
+
 function overview(ctx) {
   const { state, c } = ctx;
+  if (c.journeyState === 'upcoming') {
+    return `<section class="surface empty-state"><span class="p-icon">${I.calendar}</span><div><b>Le statistiche partono ${D.formatDateLong(c.journey.start)}</b><p>Fino ad allora nulla viene conteggiato. Qui troverai costanza, serie, sonno, lettura e risultati di ogni settimana.</p></div></section>`;
+  }
   const cons = c.consistency;
   const sleepP = c.perHabit.sleep;
   const readP = c.perHabit.read;
@@ -428,8 +543,7 @@ function overview(ctx) {
       </div>
       <p class="cons-note">La costanza misura quanto rispetti gli obiettivi realistici di ogni settimana, non la perfezione.${unlogged ? ` ${unlogged} ${D.plural(unlogged, 'giorno non registrato conta', 'giorni non registrati contano')} come non fatti.` : ''}</p>
     </section>
-    <div class="section-head"><h2>Costanza settimanale</h2></div>
-    <section class="surface">${weeksChart(ctx)}</section>
+    ${weeksChart(ctx) ? `<div class="section-head"><h2>Costanza settimanale</h2></div><section class="surface">${weeksChart(ctx)}</section>` : ''}
     <div class="section-head"><h2>Serie</h2></div>
     <div class="tiles three">
       ${streakTile('Sonno', c.streaks.sleep, 'c-sleep-t', 'notte', 'notti')}
@@ -455,10 +569,11 @@ function overview(ctx) {
       </div>
       ${readChart(ctx)}
       <p class="foot">${readP.doneTotal} ${D.plural(readP.doneTotal, 'giornata', 'giornate')} con almeno ${c.read.goal} minuti · record ${c.read.bestDay} min.</p>
+      ${readingLadder(c.read.totalMinutes)}
     </section>
     <div class="section-head"><h2>Risultati delle settimane</h2></div>
-    <div class="list">${weeks.map((b) => `<div class="list-item week-res"><span class="lbl">${blockLabel(b)}${b.timing === 'current' ? ' · in corso' : ''}<small>${D.formatRange(b.from, b.to)} · ${Object.entries(b.habits).map(([hid, hp]) => `${hp.done}/${hp.target} ${unit(S.habitById(state, hid), hp.target)}`).join(' · ')}</small></span>
-      ${b.achieved ? `<span class="medal on">${I.check}</span>` : b.timing === 'current' ? '<span class="medal now"></span>' : '<span class="medal">–</span>'}</div>`).join('') || '<div class="list-item"><span class="lbl muted">Nessuna settimana ancora.</span></div>'}</div>
+    <div class="list">${weeks.map((b) => `<button class="list-item week-res" data-action="open-week" data-key="${b.key}"><span class="lbl">${blockLabel(b)}${b.timing === 'current' ? ' · in corso' : ''}<small>${D.formatRange(b.from, b.to)} · ${Object.entries(b.habits).map(([hid, hp]) => `${hp.done}/${hp.target} ${unit(S.habitById(state, hid), hp.target)}`).join(' · ')}</small></span>
+      ${b.achieved ? `<span class="medal on">${I.check}</span>` : b.timing === 'current' ? '<span class="medal now"></span>' : '<span class="medal">–</span>'}</button>`).join('') || '<div class="list-item"><span class="lbl muted">Nessuna settimana ancora.</span></div>'}</div>
     ${sleepP ? '' : ''}`;
 }
 
@@ -530,7 +645,7 @@ export function viewProgress(ctx) {
   const { ui, c } = ctx;
   const seg = [['overview', 'Panoramica'], ['calendar', 'Calendario'], ['history', 'Storico']];
   const body = ui.progressTab === 'calendar' ? calendar(ctx) : ui.progressTab === 'history' ? historyList(ctx) : overview(ctx);
-  return `${header(c.journeyState === 'active' ? `Giorno ${c.journeyDay} di 30` : 'Il tuo storico', 'Progressi')}
+  return `${header(c.journeyState === 'active' ? `Giorno ${c.journeyDay} di 30` : c.journeyState === 'upcoming' ? `Dal ${D.formatDayMonth(c.journey.start)}` : 'Il tuo storico', 'Progressi')}
     <div class="segmented" role="tablist">${seg.map(([id, l]) => `<button role="tab" aria-selected="${ui.progressTab === id}" class="${ui.progressTab === id ? 'on' : ''}" data-action="progress-tab" data-id="${id}">${l}</button>`).join('')}</div>
     <div class="seg-body">${body}</div>`;
 }
@@ -587,6 +702,7 @@ export function viewProfile(ctx) {
       <button class="list-item" data-action="import"><span class="li-icon c-read">${I.download}</span><span class="lbl">Importa da file<small>Accetta anche i backup delle versioni precedenti</small></span>${I.chevR}</button>
       <button class="list-item" data-action="import-text"><span class="li-icon c-muted">${I.paste}</span><span class="lbl">Incolla un backup</span>${I.chevR}</button>
       <button class="list-item" data-action="copy-backup"><span class="li-icon c-muted">${I.copy}</span><span class="lbl">Copia il backup negli appunti</span>${I.chevR}</button>
+      ${(() => { const t = S.trialSummary(state); return t && t.days ? `<div class="list-item"><span class="li-icon c-muted">${I.shield}</span><span class="lbl">Giorni di prova<small>${t.days} ${D.plural(t.days, 'giorno', 'giorni')} (${D.formatRange(t.from, t.to)}) conservati a parte: esclusi da percorso, XP e statistiche, inclusi nei backup</small></span></div>` : ''; })()}
     </div>
 
     <div class="section-head"><h2>App</h2></div>
@@ -680,31 +796,36 @@ export function sheetTimer(ctx) {
   const iso = timer?.iso || today;
   const already = state.entries.read[iso]?.min || 0;
   const running = timer && timer.since;
+  const total = Object.values(state.entries.read).reduce((x, e) => x + e.min, 0);
+  const ms = E.readingMilestone(total);
   const size = 236;
-  const r = (size - 14) / 2;
+  const r = (size - 6) / 2;
   const circ = 2 * Math.PI * r;
-  return `${sheetHead('Lettura', h.config.book ? esc(h.config.book) : `Obiettivo: ${goal} minuti`)}
-    <div class="timer">
-      <div class="t-ring" style="--circ:${circ.toFixed(2)}"><svg viewBox="0 0 ${size} ${size}" width="${size}" height="${size}">
-        <circle class="ring-track" cx="${size / 2}" cy="${size / 2}" r="${r}" stroke-width="10"/>
-        <circle class="ring-bar fill-read-s" data-timer-ring data-goal="${goal * 60000}" data-already="${already * 60000}" cx="${size / 2}" cy="${size / 2}" r="${r}" stroke-width="10" stroke-dasharray="${circ.toFixed(2)}" style="stroke-dashoffset:${circ.toFixed(2)}" stroke-linecap="round" transform="rotate(-90 ${size / 2} ${size / 2})"/></svg>
-        <div class="center"><b data-timer>00:00</b><span data-timer-label>${timer ? (running ? 'in lettura' : 'in pausa') : 'pronto'}</span></div></div>
-      ${already ? `<p class="muted small center">Già registrati oggi: ${already} min</p>` : ''}
+  return `<div class="reader ${running ? 'is-running' : ''}">
+    <div class="rd-top"><button class="rd-close" data-action="close-sheet" aria-label="Chiudi">${I.chevL}<span>${timer ? 'Il timer continua' : 'Chiudi'}</span></button></div>
+    <div class="rd-book">${h.config.book ? `<i>${esc(h.config.book)}</i>` : '<span>Lettura</span>'}</div>
+    <div class="t-ring rd-ring"><svg viewBox="0 0 ${size} ${size}" width="${size}" height="${size}">
+        <circle class="ring-track" cx="${size / 2}" cy="${size / 2}" r="${r}" stroke-width="2"/>
+        <circle class="ring-bar fill-read-s" data-timer-ring data-goal="${goal * 60000}" data-already="${already * 60000}" cx="${size / 2}" cy="${size / 2}" r="${r}" stroke-width="3" stroke-dasharray="${circ.toFixed(2)}" style="stroke-dashoffset:${circ.toFixed(2)}" stroke-linecap="round" transform="rotate(-90 ${size / 2} ${size / 2})"/></svg>
+      <div class="center"><b data-timer>00:00</b><span data-timer-label>${timer ? (running ? 'in lettura' : 'in pausa') : `obiettivo ${goal} min`}</span></div></div>
+    <p class="rd-sub">${already ? `Oggi hai già registrato ${already} min` : `Leggi almeno ${goal} minuti. Puoi bloccare il telefono: il tempo continua.`}</p>
+    <div class="rd-controls">
       ${timer
-        ? `<button class="btn ${running ? 'btn-ghost' : 'btn-read'}" data-action="${running ? 'timer-pause' : 'timer-resume'}">${running ? `${I.pause}Pausa` : `${I.play}Riprendi`}</button>
-           <button class="btn btn-read" data-action="timer-finish">${I.check}Termina e salva</button>
+        ? `<button class="rd-main ${running ? '' : 'go'}" data-action="${running ? 'timer-pause' : 'timer-resume'}" aria-label="${running ? 'Pausa' : 'Riprendi'}">${running ? I.pause : I.play}</button>
+           <button class="btn btn-read rd-save" data-action="timer-finish">${I.check}Termina e salva</button>
            <button class="link center-link" data-action="timer-discard">Annulla la sessione</button>`
-        : `<button class="btn btn-read" data-action="timer-start">${I.play}Inizia a leggere</button>
-           <button class="btn btn-ghost" data-action="quick-read">${I.check}Ho già letto ${goal} minuti</button>`}
+        : `<button class="rd-main go" data-action="timer-start" aria-label="Inizia a leggere">${I.play}</button>
+           <button class="btn btn-ghost rd-save" data-action="quick-read">${I.check}Ho già letto ${goal} minuti</button>`}
     </div>
-    <div class="field"><label for="book">Libro <small>facoltativo</small></label><input class="text-input" id="book" type="text" maxlength="120" placeholder="Titolo" value="${esc(h.config.book)}" data-change="book" enterkeyhint="done"></div>`;
+    <div class="rd-foot"><span>${nf(total)} min letti in tutto</span>${ms.next ? `<span>prossimo traguardo: ${minLabel(ms.next)}</span>` : ''}${bar('rd-ms', ms.progress, 'fill-read')}</div>
+  </div>`;
 }
 
 export function sheetAchievement(ctx, id) {
   const a = ctx.c.achievements.find((x) => x.id === id);
   if (!a) return '';
   return `${sheetHead('Traguardo', '')}
-    <div class="ach-detail ${a.unlocked ? 'on' : ''}">${achievementBadge(a, 104)}
+    <div class="ach-detail ${a.unlocked ? 'on' : ''}"><div class="medal-big">${medal(a, 132)}</div>
       <h3>${esc(a.title)}</h3><p>${esc(a.desc)}</p>
       ${a.unlocked ? '<span class="pill gold">Sbloccato</span>' : `<div class="ach-prog">${bar(`ad-${a.id}`, a.ratio, 'fill-gold')}<span>${nf(a.value)} / ${nf(a.target)}</span></div>`}
     </div>`;
@@ -833,9 +954,10 @@ export function sheetWhatsNew(ctx) {
 // ---------- Celebrazioni ----------
 export function overlayLevel(c, lv) {
   return `<div class="ov-inner">
+    <div class="eyebrow gold-txt lv-up">Nuovo livello</div>
     <div class="ov-ring"><svg viewBox="0 0 168 168" width="168" height="168"><circle class="ring-track" cx="84" cy="84" r="76" stroke-width="8"/><circle class="ring-bar gold draw" cx="84" cy="84" r="76" stroke-width="8" stroke-linecap="round" transform="rotate(-90 84 84)" style="--c:${(2 * Math.PI * 76).toFixed(1)}"/></svg><div class="center"><span>Livello</span><b>${lv}</b></div></div>
     <h2>${esc(E.levelTitle(lv))}</h2>
-    <p>Hai raggiunto ${nf(c.xp.total)} XP con abitudini reali, un giorno alla volta.</p>
+    <p>${nf(c.xp.total)} XP guadagnati con abitudini reali, un giorno alla volta.</p>
     ${lv < 10 ? `<p class="muted small">Prossimo: livello ${lv + 1} · ${esc(E.levelTitle(lv + 1))}</p>` : ''}
     <button class="btn btn-gold" data-action="ov-close">Continua</button></div>`;
 }
@@ -859,22 +981,58 @@ export function overlayPhase(state, b) {
 
 export function overlayWelcome(ctx) {
   const { state, c } = ctx;
-  const migrated = state.migrations.some((m) => m.from === 1);
-  const days = S.countEntries(state);
   const j = c.journey;
-  const unlocked = c.achievements.filter((a) => a.unlocked).length;
+  const trial = S.trialSummary(state);
+  const upcoming = c.journeyState === 'upcoming';
   return `<div class="ov-inner welcome">
     <img class="ob-logo" src="icons/icon-180.png" alt="">
     <div class="eyebrow">Novità</div>
-    <h2>Mezzanotte 3.0</h2>
-    ${migrated ? `<div class="safe"><span>${I.shield}</span><p><b>I tuoi dati sono al sicuro.</b> ${days} ${D.plural(days, 'giorno registrato', 'giorni registrati')}, percorso iniziato ${j ? D.formatDateLong(j.start) : '—'}.</p></div>` : ''}
-    <div class="wel-stats"><div><b>${nf(c.xp.total)}</b><span>XP già guadagnati</span></div><div><b>${c.level.n}</b><span>${esc(c.level.title)}</span></div><div><b>${unlocked}</b><span>${D.plural(unlocked, 'traguardo', 'traguardi')}</span></div></div>
-    <ul class="wel-list"><li>${I.today}<span>Sonno e lettura con un solo tocco</span></li><li>${I.target}<span>Percorso in 4 fasi con obiettivi realistici</span></li><li>${I.heart}<span>Un giorno saltato non toglie mai nulla</span></li></ul>
+    <h2>Mezzanotte 3.1</h2>
+    <div class="safe"><span>${I.flag}</span><p><b>La sfida ufficiale ${upcoming ? 'inizia' : 'è iniziata'} ${D.formatDateLong(j.start)}.</b> Giorno 1 di 30, fino al ${D.formatDayMonth(E.journeyEnd(j))}.</p></div>
+    ${trial && trial.days ? `<div class="safe neutral"><span>${I.shield}</span><p>I ${trial.days} ${D.plural(trial.days, 'giorno', 'giorni')} di prova (${D.formatRange(trial.from, trial.to)}) sono conservati a parte: non contano per percorso, XP e statistiche, ma restano nei backup.</p></div>` : ''}
+    <ul class="wel-list"><li>${I.medal}<span>Medaglie da collezione, ognuna con il suo materiale</span></li><li>${I.clock}<span>Routine serale con indicazioni contestuali</span></li><li>${I.book}<span>Timer di lettura immersivo e traguardi di lettura</span></li></ul>
     <button class="btn btn-primary" data-action="ov-close">Continua</button></div>`;
 }
 
+export function sheetWeek(ctx, key) {
+  const { state, c, today } = ctx;
+  const b = c.blocks.find((x) => x.key === key);
+  if (!b) return '';
+  const xp = E.blockXp(state, b, today);
+  const days = D.rangeISO(b.from, D.minISO(b.to, today));
+  const beds = days.map((d) => state.entries.sleep[d]?.bed).filter(Boolean).map(D.bedtimeOffset);
+  const full = days.filter((d) => E.dayInfo(state, d, today).complete).length;
+  const rows = Object.entries(b.habits).map(([hid, hp]) => {
+    const h = S.habitById(state, hid);
+    return `<div class="list-item"><span class="li-icon c-${h.color}">${icon(h.icon)}</span><span class="lbl">${esc(h.name)}<small>${hp.done} su ${hp.target} ${unit(h, hp.target)}${h.type === 'duration' ? ` · ${hp.minutes} min` : ''}</small></span>${hp.ok ? `<span class="medal on">${I.check}</span>` : `<span class="val">${hp.done}/${hp.target}</span>`}</div>`;
+  }).join('');
+  const missing = Object.entries(b.habits).filter(([, hp]) => !hp.ok);
+  const note = b.achieved
+    ? 'Tutti gli obiettivi raggiunti. Il margine che hai creato conta quanto i giorni perfetti.'
+    : b.timing === 'current'
+      ? `Settimana in corso: ${b.daysLeft === 1 ? 'resta un giorno' : `restano ${b.daysLeft} giorni`}.`
+      : `Hai fatto ${missing.map(([hid, hp]) => `${hp.done} su ${hp.target} ${unit(S.habitById(state, hid), hp.target)}`).join(' e ')}. Ogni giorno fatto resta nella costanza: la settimana nuova riparte da zero.`;
+  return `${sheetHead(`${blockLabel(b)}${b.phase ? ` · ${phaseName(b)}` : ''}`, `${D.formatRange(b.from, b.to)}`)}
+    <div class="wk-hero ${b.achieved ? 'won' : ''}"><div class="sum-ring"><svg viewBox="0 0 120 120" width="120" height="120">${ring(`wk-${b.key}`, 120, 10, b.consistency || 0, b.achieved ? 'gold' : 'grad-mix')}</svg><div class="center"><b>${b.consistency === null ? '—' : `${Math.round(b.consistency * 100)}%`}</b><span>costanza</span></div></div>
+      <div class="wk-stats"><div><b class="gold-txt">+${nf(xp)}</b><span>XP</span></div><div><b>${full}</b><span>${D.plural(full, 'giornata completa', 'giornate complete')}</span></div><div><b>${beds.length >= 2 ? D.offsetToTime(beds.reduce((x, y) => x + y, 0) / beds.length) : '—'}</b><span>ora media a letto</span></div></div></div>
+    <div class="list">${rows}</div>
+    <p class="foot left">${note}</p>`;
+}
+
 export function achievementToast(a) {
-  return `<span class="at-badge">${icon(a.icon)}</span><span class="at-text"><small>Traguardo sbloccato</small><b>${esc(a.title)}</b></span>`;
+  return `${medal(a, 44)}<span class="at-text"><small>Traguardo sbloccato</small><b>${esc(a.title)}</b></span>`;
+}
+
+export function goalToast(h, hp) {
+  const r = 18;
+  const circ = 2 * Math.PI * r;
+  return `<span class="gt-ring c-${h.color}"><svg viewBox="0 0 44 44" width="44" height="44"><circle cx="22" cy="22" r="${r}" class="ring-track" stroke-width="4"/><circle cx="22" cy="22" r="${r}" stroke-width="4" fill="none" stroke="var(--c)" stroke-linecap="round" stroke-dasharray="${circ.toFixed(1)}" style="--c0:${circ.toFixed(1)}" class="gt-fill" transform="rotate(-90 22 22)"/></svg><i>${I.check}</i></span>
+    <span class="at-text"><small>Obiettivo settimanale · +${E.XP.weekGoal} XP</small><b>${esc(h.name)}: ${hp.done} su ${hp.target} ${unit(h, hp.target)}</b></span>`;
+}
+
+export function milestoneToast(m) {
+  return `<span class="gt-ring c-read"><svg viewBox="0 0 44 44" width="44" height="44"><circle cx="22" cy="22" r="18" fill="var(--cs)"/></svg><i style="color:var(--read)">${I.book}</i></span>
+    <span class="at-text"><small>Traguardo di lettura</small><b>${minLabel(m)} di lettura in tutto</b></span>`;
 }
 
 // ---------- Primo avvio ----------

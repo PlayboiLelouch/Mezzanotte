@@ -75,8 +75,7 @@ const V1 = {
 };
 
 test('migrazione 1 → 2: nessun dato perso', () => {
-  const s = S.migrate(structuredClone(V1));
-  assert.equal(s.version, 2);
+  const s = S.migrateV1(structuredClone(V1));
   assert.equal(s.entries.sleep['2026-11-22'].bed, '23:20');
   assert.equal(s.entries.sleep['2026-11-22'].ok, true);
   assert.deepEqual(s.entries.sleep['2026-11-23'], { ok: false, bed: '00:40' });
@@ -114,7 +113,7 @@ test('migrazione idempotente e stabile dopo serializzazione', () => {
 test('migrazione di dati 1.x minimi o vuoti', () => {
   const empty = S.migrate({ app: 'mezzanotte', version: 1, start: null, days: {}, settings: {}, archive: [] });
   assert.equal(empty.journeys.length, 0);
-  const odd = S.migrate({ app: 'mezzanotte', version: 1, start: '2026-11-01', days: { '2026-11-02': { bed: '23:00' }, bad: {}, '2026-02-30': { min: 4 }, '2026-11-03': { min: -3 } } });
+  const odd = S.migrateV1({ app: 'mezzanotte', version: 1, start: '2026-11-01', days: { '2026-11-02': { bed: '23:00' }, bad: {}, '2026-02-30': { min: 4 }, '2026-11-03': { min: -3 } } });
   assert.deepEqual(Object.keys(odd.entries.sleep), ['2026-11-02']);
   assert.equal(odd.entries.sleep['2026-11-02'].ok, true);
   assert.deepEqual(odd.entries.read, {});
@@ -122,9 +121,11 @@ test('migrazione di dati 1.x minimi o vuoti', () => {
 
 test('importazione: compatibile con backup 1.x e 2, errori chiari', () => {
   const fromV1 = S.importPayload(JSON.stringify(V1));
-  assert.equal(fromV1.entries.read['2026-11-24'].min, 20);
+  assert.equal(fromV1.version, 3);
+  assert.equal(fromV1.trial.entries.read['2026-11-24'].min, 20); // giorni di prova conservati a parte
   const roundTrip = S.importPayload(S.exportPayload(fromV1));
   assert.deepEqual(roundTrip.entries, fromV1.entries);
+  assert.deepEqual(roundTrip.trial, fromV1.trial);
   assert.deepEqual(roundTrip.journeys, fromV1.journeys);
   assert.throws(() => S.importPayload('nope'), /JSON valido/);
   assert.throws(() => S.importPayload('{"ciao":1}'), /non è un backup/);
@@ -133,24 +134,101 @@ test('importazione: compatibile con backup 1.x e 2, errori chiari', () => {
 
 test('copia compatibile 1.x e recupero di dati scritti dalla versione precedente', () => {
   let s = S.migrate(structuredClone(V1));
-  s = S.setEntry(s, 'read', '2026-11-26', { min: 9 });
+  s = S.setEntry(s, 'read', '2026-12-01', { min: 9 });
+  s = S.setEntry(s, 'sleep', '2026-12-01', { bed: '00:40' });
   const v1 = S.toV1(s);
   assert.equal(v1.version, 1);
-  assert.equal(v1.start, '2026-11-22');
-  assert.deepEqual(v1.days['2026-11-23'], { sleep: false, bed: '00:40', min: 15 });
-  assert.equal(v1.days['2026-11-26'].min, 9);
+  assert.equal(v1.start, '2026-11-30');
+  assert.deepEqual(v1.days['2026-12-01'], { sleep: false, bed: '00:40', min: 9 });
+  assert.equal(v1.days['2026-11-23'], undefined); // i giorni di prova non entrano nel percorso
   // la copia è leggibile come 1.x e rimigra agli stessi dati
   const back = S.migrate(JSON.parse(JSON.stringify(v1)));
-  assert.deepEqual(back.entries.read['2026-11-26'], { min: 9 });
-  // se la 1.x scrive dopo la copia, i nuovi dati vengono uniti
+  assert.deepEqual(back.entries.read['2026-12-01'], { min: 9 });
+  assert.equal(back.journeys[0].start, '2026-11-30');
+  // se la 1.x scrive dopo la copia, i nuovi dati vengono uniti (solo dall'inizio del percorso)
   s = S.setMeta(s, { v1MirrorAt: v1.updatedAt });
-  const newer = { ...v1, days: { ...v1.days, '2026-11-27': { sleep: true, min: 6 } }, updatedAt: '2099-01-01T00:00:00.000Z' };
+  const newer = { ...v1, days: { ...v1.days, '2026-12-02': { sleep: true, min: 6 }, '2026-11-28': { min: 99 } }, updatedAt: '2099-01-01T00:00:00.000Z' };
   const r = S.mergeNewerV1(s, newer);
   assert.equal(r.merged, true);
-  assert.equal(r.state.entries.read['2026-11-27'].min, 6);
-  assert.equal(r.state.entries.sleep['2026-11-27'].ok, true);
+  assert.equal(r.state.entries.read['2026-12-02'].min, 6);
+  assert.equal(r.state.entries.sleep['2026-12-02'].ok, true);
+  assert.equal(r.state.entries.read['2026-11-28'], undefined);
   // copia non più recente: nessuna modifica
   assert.equal(S.mergeNewerV1(r.state, newer).merged, false);
+});
+
+// ---------- Avvio ufficiale (schema 3) ----------
+test('avvio ufficiale 30 novembre: dati di prova esclusi ma conservati, percorso dal giorno 1', () => {
+  // stato 3.0 reale: percorso di prova iniziato il 22, registrazioni, XP e traguardi già visti
+  let v2 = S.migrateV1(structuredClone(V1));
+  v2 = { ...v2, version: 2, meta: { ...v2.meta, seen: { ...v2.meta.seen, achievements: ['primo-passo'], level: 2, welcome: '3.0.0' } } };
+  v2.habits = [...v2.habits, { id: 'prova', type: 'check', name: 'Prova', icon: 'run', color: 'sky', since: '2026-11-25', archivedAt: null, config: { perWeek: 3 } }];
+  v2.entries.prova = { '2026-11-25': { done: true } };
+  const s = S.migrate(JSON.parse(JSON.stringify(v2)));
+  assert.equal(s.version, 3);
+  assert.equal(s.journeys.length, 1);
+  assert.equal(s.journeys[0].start, '2026-11-30');
+  assert.deepEqual(s.journeys[0].plan, { sleep: [4, 5, 5, 6], read: [4, 5, 6, 6] });
+  assert.deepEqual(s.entries.sleep, {});
+  assert.deepEqual(s.entries.read, {});
+  // nulla è stato cancellato
+  for (const iso of Object.keys(V1.days)) assert.ok(s.trial.entries.read[iso], iso);
+  assert.equal(s.trial.entries.read['2026-10-02'].min, 8);
+  assert.equal(s.trial.entries.prova['2026-11-25'].done, true);
+  assert.equal(s.trial.journeys.length, 2);
+  assert.deepEqual(s.trial.habits, ['prova']);
+  assert.equal(S.habitById(s, 'prova').archivedAt, '2026-11-29'); // nessuna abitudine di prova resta attiva
+  assert.equal(S.habitById(s, 'read').config.book, 'Se una notte d\'inverno un viaggiatore'); // impostazioni conservate
+  assert.equal(s.meta.seen.level, 1);
+  assert.deepEqual(s.meta.seen.achievements, []);
+  assert.equal(s.meta.seen.welcome, null);
+  assert.deepEqual(S.trialSummary(s), { days: 5, from: '2026-10-02', to: '2026-11-25' });
+  // idempotente
+  assert.deepEqual(S.migrate(JSON.parse(JSON.stringify(s))), s);
+  // registrazioni dal 30 novembre in poi restano nel percorso
+  const later = S.migrate({ ...JSON.parse(JSON.stringify(v2)), entries: { ...v2.entries, read: { ...v2.entries.read, '2026-11-30': { min: 7 } } } });
+  assert.equal(later.entries.read['2026-11-30'].min, 7);
+  assert.equal(later.trial.entries.read['2026-11-30'], undefined);
+});
+
+test('calendario ufficiale: fasi, sabati liberi, fine della sfida', () => {
+  const s = S.startJourney(S.createState(), '2026-11-30');
+  const b = E.allBlocks(s, '2026-11-26');
+  assert.deepEqual(b.slice(0, 5).map((x) => [x.from, x.to]), [
+    ['2026-11-30', '2026-12-06'], ['2026-12-07', '2026-12-13'], ['2026-12-14', '2026-12-20'], ['2026-12-21', '2026-12-27'], ['2026-12-28', '2026-12-29'],
+  ]);
+  assert.deepEqual(b.slice(0, 4).map((x) => x.targets.sleep), [4, 5, 5, 6]);
+  assert.deepEqual(b.slice(0, 4).map((x) => x.targets.read), [4, 5, 6, 6]);
+  assert.deepEqual(b[4].targets, { sleep: 2, read: 2 });
+  const j = s.journeys[0];
+  assert.equal(E.journeyState(j, '2026-11-29'), 'upcoming');
+  assert.equal(E.journeyDay(j, '2026-11-29'), null);
+  assert.equal(E.journeyDay(j, '2026-11-30'), 1);
+  assert.equal(E.journeyDay(j, '2026-12-29'), 30);
+  assert.equal(E.journeyState(j, '2026-12-29'), 'active');
+  assert.equal(E.journeyState(j, '2026-12-30'), 'completed');
+  const h = S.habitById(s, 'sleep');
+  for (const sat of ['2026-12-05', '2026-12-12', '2026-12-19', '2026-12-26']) assert.equal(E.status(s, h, sat, '2026-12-30'), 'free', sat);
+  // prima dell'inizio: nessun errore, assenza o XP
+  const pre = S.setEntry(s, 'read', '2026-11-29', { min: 30 });
+  const c = E.compute(pre, '2026-11-29');
+  assert.equal(c.xp.total, 0);
+  assert.equal(c.consistency.overall, null);
+  assert.equal(E.status(pre, S.habitById(pre, 'read'), '2026-11-29', '2026-11-29'), 'inactive');
+  assert.equal(E.compute(pre, '2026-11-30').days.length, 1);
+  // dopo l'ultimo giorno: tutte le date del percorso, nessun giorno inventato
+  const end = E.compute(s, '2026-12-29');
+  assert.equal(end.journeyDay, 30);
+  assert.equal(end.days.length, 30);
+});
+
+test('traguardi di lettura e medaglie distinte', () => {
+  assert.deepEqual(E.readingMilestone(0), { reached: [], next: 30, prev: 0, progress: 0 });
+  assert.equal(E.readingMilestone(174).next, 300);
+  assert.deepEqual(E.readingMilestone(174).reached, [30, 60, 150]);
+  const looks = E.ACHIEVEMENTS.map((a) => `${a.medal.material}/${a.medal.shape}`);
+  assert.equal(new Set(looks).size, looks.length);
+  assert.equal(new Set(E.ACHIEVEMENTS.map((a) => a.medal.material)).size, E.ACHIEVEMENTS.length);
 });
 
 // ---------- Registrazioni ----------
@@ -336,7 +414,7 @@ test('traguardi calcolati dal comportamento reale', () => {
   assert.equal(E.compute(s, add(START, 11)).achievements.find((a) => a.id === 'ripartenza').unlocked, true);
   // 30 giorni di percorso
   assert.equal(E.compute(fresh(), add(START, 29)).achievements.find((a) => a.id === 'trenta-giorni').unlocked, true);
-  assert.equal(E.ACHIEVEMENTS.length, 12);
+  assert.equal(E.ACHIEVEMENTS.length, 14);
 });
 
 // ---------- Proposte ----------
@@ -438,7 +516,7 @@ test('messaggi contestuali basati sui progressi reali', () => {
   // dopo un giorno saltato: messaggio non colpevolizzante con i progressi reali
   const later = E.compute(s, add(START, 5));
   const m2 = M.buildMessages(s, later, new Date(2026, 10, 28, 10, 0)).find((m) => m.id === 'after-miss');
-  assert.ok(m2.text.startsWith('Una giornata saltata non annulla'));
+  assert.ok(m2.text.startsWith('Un giorno saltato non cancella nulla'));
   assert.ok(m2.text.includes('3 notti'));
   // sabato
   assert.ok(M.buildMessages(s, later, new Date(2026, 10, 28, 10, 0)).some((m) => m.id === 'saturday'));

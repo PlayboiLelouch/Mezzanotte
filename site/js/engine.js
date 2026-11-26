@@ -63,8 +63,8 @@ export function status(state, h, iso, today) {
   if (!habitActiveOn(h, iso)) return 'inactive';
   const e = state.entries[h.id]?.[iso];
   const ts = trackingStart(state);
-  const before = !ts || iso < ts;
-  if (before && !e) return 'inactive';
+  // prima dell'inizio del percorso nulla conta: né successi né mancanze
+  if (!ts || iso < ts) return 'inactive';
   if (isFreeDay(h, iso)) return 'free';
   let st;
   if (h.type === 'bedtime') {
@@ -80,7 +80,6 @@ export function status(state, h, iso, today) {
     if (e && typeof e.done === 'boolean') st = e.done ? 'done' : 'missed';
     else st = iso === today ? 'pending' : 'unlogged';
   }
-  if (before && st !== 'done' && st !== 'missed' && st !== 'partial') return 'inactive';
   return st;
 }
 
@@ -269,20 +268,32 @@ export function levelTitle(n) {
 }
 
 // ---------- Traguardi ----------
+// Ogni medaglia ha materiale e forma propri (vedi views.js → medal()).
 export const ACHIEVEMENTS = [
-  { id: 'primo-passo', title: 'Primo passo', desc: 'Completa un\'abitudine per la prima volta.', icon: 'spark', metric: 'habitDone', target: 1 },
-  { id: 'prima-giornata', title: 'Prima giornata completa', desc: 'Tutte le abitudini della giornata completate.', icon: 'sun', metric: 'fullDays', target: 1 },
-  { id: 'tre-notti', title: '3 notti in orario', desc: 'Tre notti consecutive a letto entro mezzanotte.', icon: 'moonStars', metric: 'sleepBestStreak', target: 3 },
-  { id: 'sette-letture', title: '7 letture', desc: 'Sette giornate di lettura completate.', icon: 'bookOpen', metric: 'readDone', target: 7 },
-  { id: 'prima-settimana', title: 'Prima settimana riuscita', desc: 'Tutti gli obiettivi di una settimana raggiunti.', icon: 'flag', metric: 'weeksAchieved', target: 1 },
-  { id: 'ora-di-lettura', title: '60 minuti di lettura', desc: 'Un\'ora di lettura in totale.', icon: 'hourglass', metric: 'readMinutes', target: 60 },
-  { id: 'dieci-giornate', title: '10 giornate complete', desc: 'Dieci giornate con tutte le abitudini fatte.', icon: 'sunrise', metric: 'fullDays', target: 10 },
-  { id: 'ripartenza', title: 'Ripartenza', desc: 'Torna alle abitudini dopo almeno tre giorni di pausa.', icon: 'restart', metric: 'restarts', target: 1 },
-  { id: 'settimana-sonno', title: 'Settimana del sonno', desc: 'Tutte le notti valide di una settimana in orario.', icon: 'moonFull', metric: 'perfectSleepWeeks', target: 1 },
-  { id: 'trenta-giorni', title: '30 giorni di percorso', desc: 'Arriva al trentesimo giorno di un percorso.', icon: 'mountain', metric: 'journeysReached30', target: 1 },
-  { id: 'dieci-ore', title: '10 ore di lettura', desc: 'Seicento minuti di lettura in totale.', icon: 'library', metric: 'readMinutes', target: 600 },
-  { id: 'cinquanta-notti', title: '50 notti in orario', desc: 'Cinquanta notti a letto entro mezzanotte.', icon: 'stars', metric: 'sleepDone', target: 50 },
+  { id: 'primo-passo', title: 'Primo passo', desc: 'Completa un\'abitudine per la prima volta.', icon: 'spark', metric: 'habitDone', target: 1, medal: { material: 'bronze', shape: 'circle' } },
+  { id: 'prima-giornata', title: 'Prima giornata completa', desc: 'Tutte le abitudini della giornata completate.', icon: 'sun', metric: 'fullDays', target: 1, medal: { material: 'silver', shape: 'circle' } },
+  { id: 'tre-notti', title: '3 notti in orario', desc: 'Tre notti consecutive a letto entro mezzanotte.', icon: 'moonStars', metric: 'sleepBestStreak', target: 3, medal: { material: 'lavender', shape: 'hexagon' } },
+  { id: 'sette-letture', title: '7 letture', desc: 'Sette giornate di lettura completate.', icon: 'bookOpen', metric: 'readDone', target: 7, medal: { material: 'emerald', shape: 'hexagon' } },
+  { id: 'prima-settimana', title: 'Prima settimana riuscita', desc: 'Tutti gli obiettivi di una settimana raggiunti.', icon: 'flag', metric: 'weeksAchieved', target: 1, medal: { material: 'gold', shape: 'octagon' } },
+  { id: 'ora-di-lettura', title: '60 minuti di lettura', desc: 'Un\'ora di lettura in totale.', icon: 'hourglass', metric: 'readMinutes', target: 60, medal: { material: 'copper', shape: 'circle' } },
+  { id: 'dieci-giornate', title: '10 giornate complete', desc: 'Dieci giornate con tutte le abitudini fatte.', icon: 'sunrise', metric: 'fullDays', target: 10, medal: { material: 'rose', shape: 'scallop' } },
+  { id: 'ripartenza', title: 'Ripartenza', desc: 'Torna alle abitudini dopo almeno tre giorni di pausa.', icon: 'restart', metric: 'restarts', target: 1, medal: { material: 'pearl', shape: 'circle' } },
+  { id: 'settimana-sonno', title: 'Settimana del sonno', desc: 'Tutte le notti valide di una settimana in orario.', icon: 'moonFull', metric: 'perfectSleepWeeks', target: 1, medal: { material: 'midnight', shape: 'octagon' } },
+  { id: 'quattro-settimane', title: 'Quattro settimane solide', desc: 'Quattro settimane con almeno il 75% di costanza.', icon: 'trend', metric: 'solidWeeks', target: 4, medal: { material: 'steel', shape: 'shield' } },
+  { id: 'trenta-giorni', title: '30 giorni di percorso', desc: 'Arriva al trentesimo giorno di un percorso.', icon: 'mountain', metric: 'journeysReached30', target: 1, medal: { material: 'platinum', shape: 'scallop' } },
+  { id: 'dieci-ore', title: '10 ore di lettura', desc: 'Seicento minuti di lettura in totale.', icon: 'library', metric: 'readMinutes', target: 600, medal: { material: 'malachite', shape: 'octagon' } },
+  { id: 'cinquanta-notti', title: '50 notti in orario', desc: 'Cinquanta notti a letto entro mezzanotte.', icon: 'stars', metric: 'sleepDone', target: 50, medal: { material: 'obsidian', shape: 'scallop' } },
+  { id: 'cento-giornate', title: '100 giornate complete', desc: 'Cento giornate con tutte le abitudini fatte: costanza di lungo periodo.', icon: 'crown', metric: 'fullDays', target: 100, medal: { material: 'aurora', shape: 'shield' } },
 ];
+
+// Piccoli traguardi di lettura: basati solo sui minuti realmente registrati.
+export const READING_MILESTONES = [30, 60, 150, 300, 600, 1000, 1500, 3000, 5000];
+export function readingMilestone(total) {
+  const reached = READING_MILESTONES.filter((m) => total >= m);
+  const next = READING_MILESTONES.find((m) => total < m) || null;
+  const prev = reached.length ? reached[reached.length - 1] : 0;
+  return { reached, next, prev, progress: next ? (total - prev) / (next - prev) : 1 };
+}
 
 // ---------- Calcolo completo ----------
 export function compute(state, today) {
@@ -292,8 +303,7 @@ export function compute(state, today) {
   const ts = trackingStart(state);
 
   // intervallo di date da analizzare
-  let first = ts || today;
-  for (const map of Object.values(state.entries)) for (const iso of Object.keys(map)) if (iso < first) first = iso;
+  const first = ts || today;
   const dates = first <= today ? D.rangeISO(first, today) : [];
 
   const perHabit = {};
@@ -333,12 +343,14 @@ export function compute(state, today) {
   let xpWeeks = 0;
   let weeksAchieved = 0;
   let perfectSleepWeeks = 0;
+  let solidWeeks = 0;
   for (const b of blocks) {
     if (b.timing === 'future') continue;
     for (const hp of Object.values(b.habits)) if (hp.ok) xpWeeks += XP.weekGoal;
     if (b.achieved && Object.keys(b.habits).length) weeksAchieved++;
     const sp = b.habits.sleep;
     if (sp && !b.partial && b.kind !== 'final' && sp.eligible >= 6 && sp.done >= sp.eligible) perfectSleepWeeks++;
+    if (b.timing === 'past' && !b.partial && b.kind !== 'final' && b.consistency !== null && b.consistency >= 0.75) solidWeeks++;
   }
 
   const streaks = {};
@@ -392,6 +404,7 @@ export function compute(state, today) {
     readMinutes,
     restarts,
     perfectSleepWeeks,
+    solidWeeks,
     journeysReached30: reached30,
   };
   const achievements = ACHIEVEMENTS.map((a) => {
@@ -399,9 +412,13 @@ export function compute(state, today) {
     return { ...a, value: Math.min(value, a.target), unlocked: value >= a.target, ratio: Math.min(1, value / a.target) };
   });
 
+  const jBlocks = journey ? blocks.filter((b) => b.journeyId === journey.id && b.kind !== 'maintenance') : [];
+  const goalsTotal = jBlocks.reduce((a, b) => a + Object.keys(b.habits).length, 0);
+  const goalsDone = jBlocks.reduce((a, b) => a + Object.values(b.habits).filter((hp) => hp.ok).length, 0);
   return {
     today,
     journey,
+    journeyGoals: { done: goalsDone, total: goalsTotal },
     journeyState: jState,
     journeyDay: journeyDay(journey, today),
     blocks,
@@ -441,6 +458,14 @@ export function xpForDay(state, iso, today) {
   let xp = 0;
   for (const s of Object.values(info.status)) if (s === 'done') xp += XP.habit;
   if (info.complete) xp += XP.fullDay;
+  return xp;
+}
+
+// XP guadagnati in un blocco (settimana): giornate + obiettivi settimanali.
+export function blockXp(state, b, today) {
+  let xp = 0;
+  for (let d = b.from; d <= b.to && d <= today; d = D.addDays(d, 1)) xp += xpForDay(state, d, today);
+  for (const hp of Object.values(b.habits)) if (hp.ok) xp += XP.weekGoal;
   return xp;
 }
 

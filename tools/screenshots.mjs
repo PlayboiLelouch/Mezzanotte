@@ -7,26 +7,25 @@ import { mkdir } from 'node:fs/promises';
 const { chromium, devices } = createRequire(import.meta.url)('playwright');
 const site = process.argv[2];
 const out = process.argv[3];
-const time = process.argv[4] || '2026-11-25T21:40:00+01:00';
+const time = process.argv[4] || '2026-12-09T19:10:00+01:00';
 const scale = Number(process.argv[5] || 0);
 await mkdir(out, { recursive: true });
 const PORT = 8500 + Math.floor(Math.random() * 90);
 const srv = spawn('python3', ['-m', 'http.server', String(PORT), '--bind', '127.0.0.1', '--directory', site], { stdio: 'ignore' });
 await new Promise((r) => setTimeout(r, 700));
 const browser = await chromium.launch();
-const days = {};
-const d0 = new Date(2026, 10, 8, 12);
-for (let i = 0; i < 17; i++) {
-  const d = new Date(d0); d.setDate(d.getDate() + i);
-  const iso = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-  const e = {};
-  if (i % 5 !== 3) e.sleep = i % 4 !== 1;
-  if (i % 3 === 0) e.bed = e.sleep ? `23:${String(20 + i).padStart(2, '0')}` : '00:35';
-  if (i % 6 !== 2) e.min = 5 + (i * 7) % 20;
-  if (e.bed) e.sleep = !(e.bed < '12:00');
-  days[iso] = e;
+// dati di esempio: sfida iniziata il 30 novembre 2026
+const iso = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+const sleep = {};
+const read = {};
+const d0 = new Date(2026, 10, 30, 12);
+for (let i = 0; i < 9; i++) {
+  const x = new Date(d0); x.setDate(d0.getDate() + i);
+  if (x.getDay() !== 6 && i % 4 !== 2) sleep[iso(x)] = i % 3 === 0 ? { bed: `23:${String(30 + i).padStart(2, '0')}`, ok: true } : { ok: true };
+  if (i % 5 !== 3) read[iso(x)] = { min: 6 + (i * 7) % 18 };
 }
-const v1 = { app: 'mezzanotte', version: 1, start: '2026-11-08', days, settings: { book: 'Il nome della rosa' }, archive: [], createdAt: '2026-11-08T09:00:00.000Z', updatedAt: '2026-11-24T22:00:00.000Z' };
+const seed = JSON.stringify({ app: 'mezzanotte', version: 3, habits: [], entries: { sleep, read }, journeys: [{ id: 1, start: '2026-11-30' }], settings: {}, meta: { seen: { welcome: '3.1.0', level: 9, achievements: ['primo-passo', 'prima-giornata', 'tre-notti', 'sette-letture', 'prima-settimana', 'ora-di-lettura', 'dieci-giornate'], phases: ['1:0'], goals: ['1:0:sleep', '1:0:read', 'lettura:30', 'lettura:60'], recaps: ['1:0'] } } });
+const SAFE = ':root{--safe-top:59px!important;--safe-bottom:34px!important}';
 const report = [];
 for (const name of ['iPhone SE', 'iPhone 13 Mini', 'iPhone 15 Pro', 'iPhone 15 Pro Max']) {
   const opts = { ...devices[name], timezoneId: 'Europe/Rome', locale: 'it-IT' };
@@ -36,7 +35,10 @@ for (const name of ['iPhone SE', 'iPhone 13 Mini', 'iPhone 15 Pro', 'iPhone 15 P
   const errors = [];
   page.on('pageerror', (e) => errors.push(String(e)));
   await page.clock.install({ time: new Date(time) });
-  await page.addInitScript((v) => { if (!localStorage.getItem('mezzanotte:v1')) localStorage.setItem('mezzanotte:v1', v); }, JSON.stringify(v1));
+  await page.addInitScript(([v, css]) => {
+    if (!localStorage.getItem('mezzanotte:v2')) localStorage.setItem('mezzanotte:v2', v);
+    if (css) document.addEventListener('DOMContentLoaded', () => { const st = document.createElement('style'); st.textContent = css; document.head.appendChild(st); });
+  }, [seed, name === 'iPhone SE' ? '' : SAFE]);
   await page.goto(`http://127.0.0.1:${PORT}/`);
   await page.waitForTimeout(900);
   await page.click('.overlay [data-action="ov-close"]').catch(() => {});

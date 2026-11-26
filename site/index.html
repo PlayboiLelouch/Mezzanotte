@@ -48,11 +48,12 @@
 </head>
 <body>
   <div class="ambient"></div>
-  <svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+  <svg id="svg-defs" width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
     <defs>
       <linearGradient id="gMix" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#ab9fff"/><stop offset="1" stop-color="#63d7ab"/></linearGradient>
     </defs>
   </svg>
+  <div class="status-shade" aria-hidden="true"></div>
   <main id="app" aria-live="polite"></main>
   <noscript><p style="padding:40px;text-align:center">MEZZANOTTE richiede JavaScript.</p></noscript>
   <script type="module" src="js/app.js"></script>

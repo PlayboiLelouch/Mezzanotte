@@ -1,9 +1,13 @@
-# MEZZANOTTE 3.0 — sistema di crescita personale
+# MEZZANOTTE 3.1 — sistema di crescita personale
 
 PWA gratuita per iPhone per costruire disciplina con due abitudini:
 **a letto entro mezzanotte** e **almeno 5 minuti di lettura** al giorno, in un percorso di 30 giorni.
 
 App: https://playboilelouch.github.io/Mezzanotte/
+
+**Sfida ufficiale: lunedì 30 novembre 2026 (Giorno 1) – martedì 29 dicembre 2026 (Giorno 30).**
+Fase 1: 30 nov – 6 dic · Fase 2: 7–13 dic · Fase 3: 14–20 dic · Fase 4: 21–27 dic · Bilancio: 28–29 dic.
+Prima del 30 novembre l'app mostra una schermata di preparazione con conto alla rovescia: nulla viene conteggiato.
 
 Nessun backend, account, database esterno, analytics, pubblicità o servizio a pagamento.
 Tutti i dati restano sul dispositivo. Costo operativo: 0 €.
@@ -54,9 +58,22 @@ tests/fixtures/v1-site  copia dell'app 1.0 per testare l'aggiornamento reale
 tools/                icone, splash screen, screenshot
 ```
 
+## Novità 3.1
+
+- Avvio ufficiale il 30 novembre: i giorni di prova sono esclusi da percorso, XP e statistiche ma conservati in `trial`.
+- 14 medaglie da collezione, ognuna con materiale e forma propri (bronzo, argento, oro, smalti, perla, ossidiana…).
+- Animazione dedicata agli obiettivi settimanali, riepilogo della settimana, prossimo traguardo nella Home.
+- Routine serale contestuale (tra… / niente nuovi lavori / chiudi i progetti / preparati), nessuna pressione il sabato.
+- Dopo mezzanotte «A letto ora» registra l'orario reale sulla notte giusta.
+- Timer di lettura immersivo e traguardi di lettura basati sui minuti registrati.
+- Barra di stato protetta durante lo scorrimento, contrasto più alto, grafici solo con dati sufficienti,
+  tempo trascorso del percorso separato dagli obiettivi realmente raggiunti.
+
 ## Dati e migrazione
 
-- Formato 2 in `localStorage["mezzanotte:v2"]` con copia in IndexedDB.
+- Schema 3 in `localStorage["mezzanotte:v2"]` (nome della chiave invariato) con copia in IndexedDB.
+- Migrazione 2 → 3 (avvio ufficiale): registrazioni precedenti al 30/11/2026, percorsi di prova e abitudini di prova
+  vanno in `trial`; i dati 3.0 originali restano in `mezzanotte:backup-pre-3.1`.
 - Alla prima apertura della 3.0 i dati 1.x (`mezzanotte:v1`) vengono migrati senza perdite; l'originale
   viene conservato in `mezzanotte:backup-pre-3.0`. La migrazione è versionata, idempotente e testata.
 - A ogni salvataggio viene aggiornata anche una copia compatibile 1.x in `mezzanotte:v1`: tornando alla
@@ -82,8 +99,8 @@ installa e si attiva da solo, e l'app aperta si ricarica sulla nuova versione se
 ## Pubblicazione e ripristino
 
 Il workflow `.github/workflows/pages.yml` esegue tutti i test (unitari ed end-to-end) e pubblica `site/`
-su GitHub Pages a ogni push su `main`. Il branch `ripristino-v1.0.0` contiene la versione 1.0.0
-pubblicata prima di questo aggiornamento.
+su GitHub Pages a ogni push su `main`. Punti di ripristino: i branch `ripristino-v1.0.0` e `ripristino-v3.0.0` contengono le versioni pubblicate
+prima dei rispettivi aggiornamenti.
 
 ## Limitazioni
 

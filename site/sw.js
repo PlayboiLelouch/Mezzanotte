@@ -1,5 +1,5 @@
 // MEZZANOTTE — service worker: funzionamento offline completo e aggiornamenti affidabili.
-const VERSION = 'mezzanotte-v3.0.0';
+const VERSION = 'mezzanotte-v3.1.0';
 const CORE = [
   './',
   './index.html',
@@ -13,6 +13,7 @@ const CORE = [
   './js/views.js',
   './js/icons.js',
   './js/fx.js',
+  './js/medals.js',
   './icons/icon.svg',
   './icons/icon-32.png',
   './icons/icon-120.png',

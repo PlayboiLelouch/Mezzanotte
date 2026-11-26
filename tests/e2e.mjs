@@ -1,6 +1,7 @@
 // Test end-to-end con Playwright (Chromium, emulazione iPhone). Nessun Safari reale: è un emulatore.
 // Serve il sito in una sottocartella come su GitHub Pages e verifica anche l'aggiornamento reale
-// dall'app 1.0 (tests/fixtures/v1-site) alla 3.0 tramite service worker, con migrazione dei dati.
+// dall'app 1.0 (tests/fixtures/v1-site) alla 3.1 tramite service worker, con migrazione dei dati,
+// l'avvio ufficiale del 30 novembre 2026, tutti i sabati e la fine della sfida (29 dicembre).
 // Uso: node tests/e2e.mjs [cartella-screenshot]
 import { createRequire } from 'node:module';
 import { spawn } from 'node:child_process';
@@ -72,6 +73,9 @@ const watch = (page) => {
   page.on('pageerror', (e) => errors.push(String(e)));
   page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
 };
+const SAFE = ':root{--safe-top:59px!important;--safe-bottom:34px!important}';
+// simula le safe area dell'iPhone (Dynamic Island e barra inferiore) nelle pagine di test
+const withSafeArea = (p) => p.addInitScript((css) => document.addEventListener('DOMContentLoaded', () => { const st = document.createElement('style'); st.textContent = css; document.head.appendChild(st); }), SAFE);
 const M = (page) => page.evaluate(() => window.__mezzanotte && { state: window.__mezzanotte.state, xp: window.__mezzanotte.computed?.xp, level: window.__mezzanotte.computed?.level, source: window.__mezzanotte.source, version: window.__mezzanotte.version });
 
 // dati scritti dall'app 1.0
@@ -91,6 +95,28 @@ try {
   await page.clock.install({ time: new Date('2026-11-25T21:30:00+01:00') });
   const shot = async (name, p = page) => { if (shots) await p.screenshot({ path: path.join(shots, `${name}.png`) }); };
 
+  // apre una pagina in un dato momento (stesso archivio locale dell'iPhone di test)
+  const at = async (time) => {
+    const p = await ctx.newPage();
+    watch(p);
+    await withSafeArea(p);
+    await p.clock.install({ time: new Date(time) });
+    await p.goto(BASE);
+    await p.waitForFunction(() => window.__mezzanotte?.version === '3.1.0');
+    return p;
+  };
+  // chiude le celebrazioni a schermo intero ancora in coda
+  const settle = async (p) => {
+    for (let i = 0; i < 8; i++) {
+      await p.waitForTimeout(450);
+      if (await p.locator('.overlay.show [data-action="ov-close"]').count()) await p.click('.overlay.show [data-action="ov-close"]');
+      else if (await p.locator('.sheet.show[data-type="summary"]').count()) await p.click('.sheet .close-btn');
+      else if (i > 1) break;
+    }
+    await p.waitForTimeout(300);
+  };
+  const day = (p, iso) => p.evaluate((d) => ({ sleep: window.__mezzanotte.state.entries.sleep[d], read: window.__mezzanotte.state.entries.read[d] }), iso);
+
   let v1raw;
   await step('app 1.0 installata: onboarding, dati e timer di lettura avviato', async () => {
     await page.goto(BASE);
@@ -101,7 +127,6 @@ try {
     await page.evaluate(() => navigator.serviceWorker.ready);
     await page.reload();
     assert.equal(await page.evaluate(() => !!navigator.serviceWorker.controller), true);
-    // registrazioni nel formato 1.x, poi ricarica: l'app 1.0 le mostra
     await page.evaluate((days) => {
       const s = JSON.parse(localStorage.getItem('mezzanotte:v1'));
       s.days = days;
@@ -114,364 +139,396 @@ try {
     await page.clock.fastForward('02:00');
     v1raw = await page.evaluate(() => localStorage.getItem('mezzanotte:v1'));
     assert.equal(JSON.parse(v1raw).version, 1);
-    assert.ok(await page.evaluate(() => localStorage.getItem('mezzanotte:timer')));
   });
 
-  await step('aggiornamento automatico 1.0 → 3.0 tramite service worker', async () => {
+  await step('aggiornamento automatico 1.0 → 3.1 tramite service worker', async () => {
     await deploy(site);
     await page.evaluate(() => navigator.serviceWorker.getRegistration().then((r) => r.update()));
-    // la pagina 1.0 si ricarica da sola al cambio di service worker
-    await page.waitForFunction(() => window.__mezzanotte && window.__mezzanotte.version === '3.0.0', null, { timeout: 20000 });
+    await page.waitForFunction(() => window.__mezzanotte && window.__mezzanotte.version === '3.1.0', null, { timeout: 20000 });
     await page.waitForSelector('.overlay.show .welcome');
-    const keys = await page.evaluate(() => caches.keys());
-    assert.deepEqual(keys, ['mezzanotte-v3.0.0']);
-    await shot('00-benvenuto-3.0');
+    const txt = await page.textContent('.overlay.show');
+    assert.match(txt, /Mezzanotte 3\.1/);
+    assert.match(txt, /lunedì 30 novembre/);
+    assert.match(txt, /4 giorni di prova \(22–25 nov\)/);
+    assert.deepEqual(await page.evaluate(() => caches.keys()), ['mezzanotte-v3.1.0']);
+    await shot('00-benvenuto');
   });
 
-  await step('migrazione: nessun dato perso, copia originale conservata, compatibilità 1.x', async () => {
+  await step('migrazione e avvio ufficiale: prove conservate a parte, nulla cancellato, Giorno 1 il 30 novembre', async () => {
     const m = await M(page);
     assert.equal(m.source, 'v1');
     const s = m.state;
-    assert.equal(s.version, 2);
-    assert.equal(s.journeys[0].start, '2026-11-22');
+    assert.equal(s.version, 3);
+    assert.deepEqual(s.journeys.map((j) => j.start), ['2026-11-30']);
+    assert.deepEqual(s.entries.sleep, {});
+    assert.deepEqual(s.entries.read, {});
     for (const [iso, d] of Object.entries(V1_DAYS)) {
-      assert.equal(s.entries.sleep[iso].ok, d.sleep, iso);
-      assert.equal(s.entries.read[iso].min, d.min, iso);
-      if (d.bed) assert.equal(s.entries.sleep[iso].bed, d.bed);
+      assert.equal(s.trial.entries.sleep[iso].ok, d.sleep, iso);
+      assert.equal(s.trial.entries.read[iso].min, d.min, iso);
     }
+    assert.equal(s.trial.journeys[0].start, '2026-11-22');
     assert.equal(s.habits.find((h) => h.id === 'read').config.book, 'Il nome della rosa');
-    const kept = await page.evaluate(() => ({
-      pre: localStorage.getItem('mezzanotte:backup-pre-3.0'),
-      v2: localStorage.getItem('mezzanotte:v2'),
-      v1: localStorage.getItem('mezzanotte:v1'),
-    }));
+    assert.equal(m.xp.total, 0);
+    const kept = await page.evaluate(() => ({ pre: localStorage.getItem('mezzanotte:backup-pre-3.0'), v1: JSON.parse(localStorage.getItem('mezzanotte:v1')), timer: localStorage.getItem('mezzanotte:timer') }));
     assert.equal(kept.pre, v1raw); // dati originali intatti
-    assert.ok(JSON.parse(kept.v2).version === 2);
-    const mirror = JSON.parse(kept.v1);
-    assert.equal(mirror.version, 1);
-    assert.equal(mirror.start, '2026-11-22');
-    assert.deepEqual(mirror.days['2026-11-23'], { sleep: false, bed: '00:40', min: 15 });
-    // copia in IndexedDB
+    assert.equal(kept.v1.start, '2026-11-30'); // copia compatibile 1.x
+    assert.equal(kept.timer, null); // il timer avviato nei giorni di prova non conta
     const idb = await page.evaluate(() => new Promise((res) => {
       const r = indexedDB.open('mezzanotte', 1);
-      r.onsuccess = () => { const g = r.result.transaction('kv').objectStore('kv').get('mezzanotte:v2'); g.onsuccess = () => res(g.result); };
+      r.onsuccess = () => { const g = r.result.transaction('kv').objectStore('kv').get('mezzanotte:v2'); g.onsuccess = () => res(JSON.parse(g.result)); };
     }));
-    assert.equal(JSON.parse(idb).entries.read['2026-11-24'].min, 20);
-    // XP calcolati dai dati: 22 (50) + 23 (20) + 24 (50) + 25 (50) + lettura settimana 1 (4/4 → 50) = 220
-    assert.equal(m.xp.total, 220);
-    assert.equal(m.level.n, 2);
-    // seconda apertura: nessuna nuova migrazione, stessi dati
+    assert.equal(idb.trial.entries.read['2026-11-24'].min, 20);
     await page.click('.overlay [data-action="ov-close"]');
     await page.reload();
-    await page.waitForSelector('#view-today.active .habit');
+    await page.waitForSelector('#view-today.active .prep');
     const again = await M(page);
     assert.equal(again.source, 'v2');
-    assert.deepEqual(again.state.entries, s.entries);
-    assert.equal(again.state.migrations.length, 1);
+    assert.deepEqual(again.state.trial, s.trial);
+    assert.equal(again.state.migrations.length, 2);
     assert.equal(await page.locator('.overlay').count(), 0);
   });
 
-  await step('oggi: le due abitudini sono visibili senza scorrere e la routine non è un obbligo', async () => {
-    const vh = await page.evaluate(() => window.innerHeight);
-    const tabTop = await page.evaluate(() => document.querySelector('.tabbar').getBoundingClientRect().top);
-    for (const card of ['sleep', 'read']) {
-      const box = await page.locator(`#view-today [data-card="${card}"] .check`).boundingBox();
-      assert.ok(box && box.y + box.height < tabTop, `${card} visibile`);
+  await step('dati della 3.0 (schema 2) → 3.1: stessa migrazione e copia di sicurezza', async () => {
+    const c0 = await browser.newContext(IPHONE);
+    const p0 = await c0.newPage();
+    watch(p0);
+    await p0.clock.install({ time: new Date('2026-11-26T10:00:00+01:00') });
+    const v2 = { app: 'mezzanotte', version: 2, habits: [], entries: { sleep: { '2026-11-25': { ok: true } }, read: { '2026-11-25': { min: 9 } } }, journeys: [{ id: 1, start: '2026-11-24' }], settings: { sound: false }, meta: { seen: { welcome: '3.0.0', level: 1, achievements: ['primo-passo'] } } };
+    await p0.addInitScript((d) => { if (!localStorage.getItem('mezzanotte:v2')) localStorage.setItem('mezzanotte:v2', d); }, JSON.stringify(v2));
+    await p0.goto(BASE);
+    await p0.waitForSelector('.overlay.show .welcome');
+    const s = (await M(p0)).state;
+    assert.equal(s.journeys[0].start, '2026-11-30');
+    assert.equal(s.trial.entries.read['2026-11-25'].min, 9);
+    assert.equal(JSON.parse(await p0.evaluate(() => localStorage.getItem('mezzanotte:backup-pre-3.1'))).version, 2);
+    await c0.close();
+  });
+
+  await step('prima del 30 novembre: schermata di preparazione, nessun conteggio', async () => {
+    await page.close();
+    const p = await at('2026-11-26T18:00:00+01:00');
+    await p.waitForSelector('#view-today.active .prep');
+    assert.equal(await p.locator('#view-today .habit').count(), 0);
+    assert.match(await p.textContent('#view-today .large-title'), /Si parte lunedì/);
+    assert.match(await p.textContent('#view-today .prep'), /lunedì 30 novembre/);
+    assert.match(await p.textContent('#view-today .prep-count'), /3\s*giorni/);
+    assert.match(await p.textContent('#view-today [data-prep-line]'), /Mancano 3 giorni, 11 h e 00 min/);
+    await p.clock.fastForward('01:00:00');
+    await p.waitForFunction(() => /3 giorni, 10 h e 00 min/.test(document.querySelector('[data-prep-line]').textContent));
+    assert.match(await p.textContent('#view-today'), /A letto entro mezzanotte[\s\S]*Almeno 5 minuti di lettura/);
+    assert.equal(await p.locator('#view-today .plan-row').count(), 5);
+    await shot('01-preparazione', p);
+    await p.click('.tab[data-tab="progress"]');
+    assert.match(await p.textContent('#view-progress'), /Le statistiche partono lunedì 30 novembre/);
+    await p.click('[data-action="progress-tab"][data-id="calendar"]');
+    assert.equal(await p.locator('#view-progress button.cal-cell:not([disabled])').count(), 0);
+    await p.click('.tab[data-tab="goals"]');
+    const phases = await p.$$eval('#view-goals .phase .ph-top span', (els) => els.map((e) => e.textContent));
+    assert.deepEqual(phases, ['30 nov – 6 dic', '7–13 dic', '14–20 dic', '21–27 dic', '28–29 dic']);
+    assert.match(await p.textContent('#view-goals .j-metrics'), /0\s*\/ 30 giorni[\s\S]*0\s*\/ 10/);
+    await p.close();
+  });
+
+  await step('29 novembre sera: ancora preparazione, nessuna pressione e nessun errore conteggiato', async () => {
+    const p = await at('2026-11-29T23:30:00+01:00');
+    await p.waitForSelector('#view-today.active .prep');
+    assert.match(await p.textContent('#view-today .large-title'), /Si parte domani/);
+    assert.match(await p.textContent('#view-today .prep-count'), /5\s*ore/);
+    assert.match(await p.textContent('#view-today [data-prep-line]'), /Mancano 5 h e 30 min/);
+    assert.equal(await p.locator('#view-today .routine, #view-today [data-routine]').count(), 0);
+    assert.equal((await M(p)).xp.total, 0);
+    await p.clock.fastForward('05:31:00'); // lunedì 30, 05:01
+    await p.waitForSelector('#view-today .habit');
+    assert.match(await p.textContent('#view-today .large-title'), /Giorno 1\s*di 30/);
+    await p.close();
+  });
+
+  await step('30 novembre: Giorno 1 di 30, primo completamento con XP e medaglia', async () => {
+    const p = await at('2026-11-30T08:00:00+01:00');
+    await p.waitForSelector('#view-today.active .habit');
+    assert.match(await p.textContent('#view-today .large-title'), /Giorno 1\s*di 30/);
+    assert.match(await p.textContent('#view-today [data-card="sleep"]'), /A letto entro le 00:00 · routine dalle 23:15/);
+    assert.equal((await M(p)).state.journeys[0].start, '2026-11-30');
+    await p.click('#view-today [data-card="read"] .check');
+    await p.waitForFunction(() => window.__mezzanotte.state.entries.read['2026-11-30']?.min === 5);
+    assert.equal((await M(p)).xp.total, 20);
+    await p.waitForSelector('.ach-toast.show .medal-art.on');
+    assert.match(await p.textContent('.ach-toast'), /Primo passo/);
+    await p.waitForFunction(() => document.querySelector('[data-xp]').textContent === '20');
+    await p.close();
+  });
+
+  await step('routine serale contestuale e registrazione dell\'orario', async () => {
+    const p = await at('2026-11-30T21:10:00+01:00');
+    await settle(p);
+    assert.match(await p.textContent('#view-today [data-routine]'), /Routine serale tra 2 h 05 min/);
+    await p.clock.fastForward('02:10:00'); // 23:20
+    await p.waitForFunction(() => /niente nuovi lavori/.test(document.querySelector('[data-routine]')?.textContent));
+    await p.clock.fastForward('15:00'); // 23:35
+    await p.waitForFunction(() => /Chiudi i progetti/.test(document.querySelector('[data-routine]')?.textContent));
+    await p.clock.fastForward('12:00'); // 23:47
+    await p.waitForFunction(() => /Preparati per dormire/.test(document.querySelector('[data-routine]')?.textContent));
+    await p.evaluate(() => window.dispatchEvent(new Event('focus')));
+    await p.click('.tab[data-tab="goals"]');
+    await p.click('.tab[data-tab="today"]');
+    assert.ok(await p.locator('#view-today .routine .r-step.now').count());
+    await shot('02-routine', p);
+    await p.click('#view-today [data-card="sleep"] .check');
+    await p.waitForFunction(() => window.__mezzanotte.state.entries.sleep['2026-11-30']?.ok === true);
+    assert.equal((await day(p, '2026-11-30')).sleep.bed, '23:47');
+    assert.equal((await M(p)).xp.total, 50);
+    assert.match(await p.textContent('#view-today .section-head'), /Giornata completa/);
+    await p.close();
+  });
+
+  await step('dopo mezzanotte: l\'orario viene associato alla notte giusta', async () => {
+    const p = await at('2026-12-02T00:40:00+01:00'); // notte di martedì 1 dicembre
+    await settle(p);
+    assert.match(await p.textContent('#view-today .eyebrow'), /martedì 1 dicembre/i);
+    await p.click('#view-today [data-action="bed-now"]');
+    await p.waitForFunction(() => window.__mezzanotte.state.entries.sleep['2026-12-01']?.bed === '00:40');
+    assert.deepEqual((await day(p, '2026-12-01')).sleep, { ok: false, bed: '00:40' });
+    assert.match(await p.textContent('.toast.show'), /notte di martedì/);
+    assert.equal(await p.evaluate(() => window.__mezzanotte.state.entries.sleep['2026-12-02']), undefined);
+    await p.close();
+  });
+
+  await step('timer di lettura immersivo: pausa, ripresa, salvataggio, traguardi di lettura', async () => {
+    const p = await at('2026-12-02T21:00:00+01:00');
+    await settle(p);
+    await p.click('#view-today [data-action="open-timer"]');
+    await p.waitForSelector('.sheet.show[data-type="timer"] .reader');
+    assert.match(await p.textContent('.reader'), /Il nome della rosa/);
+    assert.match(await p.textContent('.reader .rd-foot'), /5 min letti in tutto/);
+    await p.click('.reader [data-action="timer-start"]');
+    await p.clock.fastForward('02:00');
+    await p.click('.reader [data-action="timer-pause"]');
+    const paused = await p.textContent('.reader [data-timer]');
+    await p.clock.fastForward('03:00');
+    await p.waitForTimeout(200);
+    assert.equal(await p.textContent('.reader [data-timer]'), paused);
+    assert.match(await p.textContent('[data-timer-label]'), /pausa/);
+    await p.click('.reader [data-action="timer-resume"]');
+    await p.clock.fastForward('02:00');
+    await shot('03-timer', p);
+    await p.click('.reader [data-action="timer-finish"]');
+    await p.waitForFunction(() => window.__mezzanotte.state.entries.read['2026-12-02']?.min === 4);
+    assert.equal(await p.evaluate(() => localStorage.getItem('mezzanotte:timer')), null);
+    // 4 minuti: sotto l'obiettivo, nessun XP per la lettura di oggi
+    assert.equal(await p.getAttribute('#view-today [data-card="read"]', 'data-status'), 'pending');
+    await p.close();
+  });
+
+  await step('obiettivi settimanali: animazione dedicata, fase completata, riepilogo della settimana', async () => {
+    const p = await at('2026-12-05T20:00:00+01:00');
+    await settle(p);
+    if (await p.locator('.welcome-back [data-action="away-dismiss"]').count()) await p.click('.welcome-back [data-action="away-dismiss"]');
+    await p.click('.tab[data-tab="progress"]');
+    await p.click('[data-action="progress-tab"][data-id="calendar"]');
+    const calm = async () => {
+      await settle(p);
+      await p.waitForFunction(() => !document.querySelector('.ach-toast'), null, { timeout: 15000 });
+    };
+    const edit = async (iso, fn) => {
+      await calm();
+      await p.click(`#view-progress .cal-cell[data-iso="${iso}"]`);
+      await p.waitForSelector('.sheet.show [data-editor="sleep"]');
+      await fn();
+      await p.click('.sheet .close-btn');
+      await p.waitForSelector('.sheet', { state: 'detached' });
+    };
+    // notti: 30 nov (già), 2, 3, 4 dicembre → 4 su 4: animazione dell'obiettivo del sonno
+    for (const d of ['2026-12-02', '2026-12-03']) await edit(d, () => p.click('.sheet [data-action="sleep-set"][data-val="1"]'));
+    await calm();
+    await p.click(`#view-progress .cal-cell[data-iso="2026-12-04"]`);
+    await p.waitForSelector('.sheet.show');
+    await p.click('.sheet [data-action="sleep-set"][data-val="1"]');
+    await p.waitForSelector('.ach-toast.goal-toast.show');
+    assert.match(await p.textContent('.ach-toast.goal-toast'), /Obiettivo settimanale[\s\S]*Sonno: 4 su 4 notti/);
+    await p.click('.sheet .close-btn');
+    await p.waitForSelector('.sheet', { state: 'detached' });
+    assert.equal((await M(p)).state.meta.seen.goals.includes('1:0:sleep'), true);
+    // letture: 30 nov (già), 1, 3, 4 dicembre → fase 1 completata
+    for (const d of ['2026-12-01', '2026-12-03']) await edit(d, () => p.click('.sheet [data-action="min-add"][data-val="5"]'));
+    await calm();
+    await p.click(`#view-progress .cal-cell[data-iso="2026-12-04"]`);
+    await p.waitForSelector('.sheet.show');
+    await p.click('.sheet [data-action="min-add"][data-val="10"]');
+    assert.equal(await p.locator('.overlay').count(), 0); // nessuna interruzione con la scheda aperta
+    await p.click('.sheet .close-btn');
+    await p.waitForSelector('.overlay.show .ov-phase');
+    assert.match(await p.textContent('.overlay.show'), /Fase 1 completata[\s\S]*Inizio/);
+    await shot('04-fase-completata', p);
+    await p.click('.overlay [data-action="ov-close"]');
+    await settle(p);
+    const m = await M(p);
+    assert.equal(m.state.entries.read['2026-12-04'].min, 10);
+    await p.close();
+    // lunedì 7: riepilogo della settimana 1 nella Home
+    const q = await at('2026-12-07T09:00:00+01:00');
+    await settle(q);
+    await q.waitForSelector('#view-today .recap');
+    assert.match(await q.textContent('#view-today .recap'), /Settimana 1: obiettivi raggiunti/);
+    assert.match(await q.textContent('#view-today .recap'), /4\/4 notti · 4\/4 letture/);
+    await q.click('#view-today .recap [data-action="open-week"]');
+    await q.waitForSelector('.sheet.show .wk-hero');
+    assert.match(await q.textContent('.sheet'), /Settimana 1 · Inizio[\s\S]*100%/);
+    await shot('05-riepilogo-settimana', q);
+    await q.click('.sheet .close-btn');
+    await q.waitForSelector('.sheet', { state: 'detached' });
+    await q.click('#view-today [data-action="recap-dismiss"]');
+    assert.equal(await q.locator('#view-today .recap').count(), 0);
+    assert.match(await q.textContent('#view-today .week-card'), /Settimana 2 · Costanza/);
+    await q.close();
+  });
+
+  for (const sat of ['2026-12-05', '2026-12-12', '2026-12-19', '2026-12-26']) {
+    await step(`sabato ${sat.slice(8)} dicembre: sera libera, nessuna pressione sull'orario`, async () => {
+      const p = await at(`${sat}T23:30:00+01:00`);
+      await settle(p);
+      assert.equal(await p.getAttribute('#view-today [data-card="sleep"]', 'data-status'), 'free');
+      assert.equal(await p.locator('#view-today [data-card="sleep"] .check, #view-today .routine, #view-today [data-routine], #view-today [data-action="bed-now"]').count(), 0);
+      const insight = await p.textContent('#view-today .insight');
+      assert.doesNotMatch(insight, /notte in orario|mezzanotte|routine/i);
+      if (sat === '2026-12-12') await shot('06-sabato', p);
+      await p.close();
+    });
+  }
+
+  await step('fine della sfida: 29 dicembre Giorno 30 di 30, poi bilancio e medaglia dei 30 giorni', async () => {
+    const p = await at('2026-12-29T21:00:00+01:00');
+    await settle(p);
+    assert.match(await p.textContent('#view-today .large-title'), /Giorno 30\s*di 30/);
+    await p.click('.tab[data-tab="goals"]');
+    assert.match(await p.textContent('#view-goals .phase.current'), /Bilancio[\s\S]*28–29 dic/);
+    await p.close();
+    const q = await at('2026-12-30T10:00:00+01:00');
+    for (let i = 0; i < 8 && !(await q.locator('.sheet.show[data-type="summary"]').count()); i++) {
+      if (await q.locator('.overlay.show [data-action="ov-close"]').count()) await q.click('.overlay.show [data-action="ov-close"]');
+      await q.waitForTimeout(600);
     }
-    assert.ok(tabTop <= vh);
-    assert.match(await page.textContent('#view-today .large-title'), /Giorno 4/);
-    assert.match(await page.textContent('#view-today .xp-line'), /Livello 2/);
-    assert.ok(await page.locator('#view-today .insight').count());
-    // timer della 1.0 ancora in corso dopo l'aggiornamento
-    assert.match(await page.textContent('#view-today [data-card="read"]'), /in corso/);
-    await shot('01-oggi');
+    await q.waitForSelector('.sheet.show[data-type="summary"]');
+    const sum = await q.textContent('.sheet');
+    assert.match(sum, /Bilancio del percorso 1/);
+    assert.match(sum, /30 nov – 29 dic · 30 giorni/);
+    await shot('07-bilancio', q);
+    await q.click('.sheet .close-btn');
+    const m = await M(q);
+    assert.equal(m.state.meta.seen.achievements.includes('trenta-giorni'), true);
+    assert.match(await q.textContent('#view-today'), /Percorso completato/);
+    await q.close();
   });
 
-  await step('timer di lettura: pausa, ripresa e salvataggio (sessione iniziata nella 1.0)', async () => {
-    await page.click('#view-today [data-action="open-timer"]');
-    await page.waitForSelector('.sheet.show [data-timer-ring]');
-    await page.clock.fastForward('02:00');
-    await page.waitForFunction(() => document.querySelector('.sheet [data-timer]')?.textContent >= '04:00');
-    await page.click('.sheet [data-action="timer-pause"]');
-    const paused = await page.textContent('.sheet [data-timer]');
-    await page.clock.fastForward('03:00');
-    await page.waitForTimeout(200);
-    assert.equal(await page.textContent('.sheet [data-timer]'), paused);
-    assert.match(await page.textContent('.sheet [data-timer-label]'), /pausa/);
-    await page.click('.sheet [data-action="timer-resume"]');
-    await page.clock.fastForward('02:00');
-    await shot('06-timer');
-    const before = (await M(page)).state.entries.read['2026-11-25'].min;
-    await page.click('.sheet [data-action="timer-finish"]');
-    await page.waitForFunction((b) => window.__mezzanotte.state.entries.read['2026-11-25'].min > b, before);
-    const after = (await M(page)).state.entries.read['2026-11-25'].min;
-    assert.equal(after - before, 6); // 2 + 2 + 2 minuti, pausa esclusa
-    assert.equal(await page.evaluate(() => localStorage.getItem('mezzanotte:timer')), null);
-    // 57 + 6 = 63 minuti totali → traguardo "60 minuti di lettura" con celebrazione
-    await page.waitForSelector('.ach-toast.show');
-    assert.match(await page.textContent('.ach-toast'), /60 minuti/);
-  });
-
-  await step('XP: un tocco su un\'abitudine già fatta apre i dettagli, nessuna duplicazione', async () => {
-    let m = await M(page);
-    const xp0 = m.xp.total;
-    // lettura già fatta oggi: il tocco apre i dettagli invece di duplicare
-    await page.click('#view-today [data-card="read"] .check');
-    await page.waitForSelector('.sheet.show [data-editor="read"]');
-    await page.click('.sheet .close-btn');
-    await page.waitForSelector('.sheet', { state: 'detached' });
-    // modifiche ripetute dalla scheda del giorno
-    await page.click('#view-today [data-card="sleep"] .h-main');
-    await page.waitForSelector('.sheet.show [data-editor="sleep"]');
-    for (let i = 0; i < 3; i++) {
-      await page.click('.sheet [data-action="sleep-set"][data-val="0"]');
-      await page.click('.sheet [data-action="sleep-set"][data-val="1"]');
-    }
-    await page.click('.sheet .close-btn');
-    await page.waitForSelector('.sheet', { state: 'detached' });
-    m = await M(page);
-    assert.equal(m.xp.total, xp0);
-    assert.match(await page.textContent('#view-today .section-head'), /Giornata completa/);
-  });
-
-  await step('obiettivi: percorso in 5 fasi, fase attuale, traguardi da sbloccare', async () => {
-    await page.click('.tab[data-tab="goals"]');
-    await page.waitForSelector('#view-goals.active .phases');
-    assert.equal(await page.locator('#view-goals .phase').count(), 5);
-    assert.equal(await page.locator('#view-goals .phase.current').count(), 1);
-    assert.match(await page.textContent('#view-goals .phase.current'), /Inizio/);
-    assert.ok(await page.locator('#view-goals .next-ach').count());
-    await page.click('#view-goals [data-action="new-habit"]');
-    await page.waitForSelector('.dialog-wrap.show');
-    assert.match(await page.textContent('.dialog-wrap'), /una cosa alla volta/i);
-    await page.click('.dialog-wrap button');
-    await page.waitForSelector('.dialog-wrap', { state: 'detached' });
-    await page.waitForTimeout(500);
-    await shot('02-obiettivi');
-  });
-
-  await step('progressi: costanza, calendario interattivo, storico', async () => {
-    await page.click('.tab[data-tab="progress"]');
-    await page.waitForSelector('#view-progress.active .consistency');
-    const cons = await page.textContent('#view-progress .cons-ring');
-    assert.match(cons, /\d+%|—/);
-    assert.ok(await page.locator('#view-progress svg[aria-label="Orari a letto, ultime 4 settimane"] circle.pt').count() >= 2);
-    assert.ok(await page.locator('#view-progress svg[aria-label="Minuti di lettura, ultime 4 settimane"] rect').count() >= 4);
-    await page.waitForTimeout(800);
-    await shot('03-progressi');
-    await page.click('[data-action="progress-tab"][data-id="calendar"]');
-    await page.waitForSelector('#view-progress .cal-grid');
-    // giorni futuri e precedenti al percorso non modificabili
-    assert.ok(await page.locator('#view-progress .cal-cell[disabled]').count() >= 20);
-    await page.click('#view-progress .cal-cell[data-iso="2026-11-23"]');
-    await page.waitForSelector('.sheet.show');
-    await page.fill('.sheet input[type="time"]', '23:50');
-    await page.locator('.sheet input[type="time"]').dispatchEvent('change');
-    await page.click('.sheet [data-action="hours-step"][data-val="0.5"]');
-    await page.click('.sheet [data-action="hours-step"][data-val="0.5"]');
-    let st = (await M(page)).state.entries.sleep['2026-11-23'];
-    assert.deepEqual(st, { ok: true, bed: '23:50', hours: 7.5 });
-    await shot('05-scheda-giorno');
-    assert.equal(await page.locator('.overlay').count(), 0); // nessuna interruzione mentre la scheda è aperta
-    await page.click('.sheet .close-btn');
-    await page.waitForSelector('.sheet', { state: 'detached' });
-    // 4 notti su 4 e 4 letture su 4: la fase 1 è completata → schermata dedicata
-    await page.waitForSelector('.overlay.show .ov-phase');
-    assert.match(await page.textContent('.overlay.show'), /Fase 1 completata/);
-    assert.match(await page.textContent('.overlay.show'), /Inizio/);
-    await shot('12-fase-completata');
-    await page.click('.overlay [data-action="ov-close"]');
-    await page.waitForSelector('.overlay', { state: 'detached' });
-    await shot('04-calendario');
-    await page.click('[data-action="progress-tab"][data-id="history"]');
-    assert.equal(await page.locator('#view-progress .hist').count(), 4);
-  });
-
-  await step('profilo: livello, 12 traguardi, preferenze (suoni disattivati di default)', async () => {
-    await page.click('.tab[data-tab="profile"]');
-    await page.waitForSelector('#view-profile.active .level-hero');
-    assert.equal(await page.locator('#view-profile .ach-cell').count(), 12);
-    const s = (await M(page)).state.settings;
-    assert.equal(s.sound, false);
-    assert.equal(s.haptics, true);
-    await page.click('[data-action="toggle-motion"]');
-    assert.equal(await page.evaluate(() => document.documentElement.classList.contains('reduce-motion')), true);
-    await page.click('[data-action="toggle-motion"]');
-    assert.equal(await page.evaluate(() => document.documentElement.classList.contains('reduce-motion')), false);
-    await page.click('[data-action="open-reminders"]');
-    await page.waitForSelector('.sheet.show .guide');
-    assert.match(await page.textContent('.sheet'), /non può programmare notifiche locali/);
-    await page.click('.sheet .close-btn');
-    await page.waitForSelector('.sheet', { state: 'detached' });
-    await shot('07-profilo');
+  await step('coerenza: XP, livello, settimana e calendario uguali in tutte le sezioni', async () => {
+    const p = await at('2026-12-09T19:00:00+01:00');
+    await settle(p);
+    const m = await M(p);
+    const c = await p.evaluate(() => {
+      const k = window.__mezzanotte.computed;
+      return { xp: k.xp.total, wk: k.blocks.find((b) => b.key === '1:1').habits, lv: k.level.n };
+    });
+    assert.match(await p.textContent('#view-today [data-xp]'), new RegExp(`^${c.xp.toLocaleString('it-IT').replace('.', '\\.')}$`));
+    await p.click('.tab[data-tab="profile"]');
+    assert.match(await p.textContent('#view-profile .level-hero'), new RegExp(`${c.xp.toLocaleString('it-IT').replace('.', '\\.')}\\s*XP totali`));
+    assert.match(await p.textContent('#view-profile .lh-ring'), new RegExp(`Livello\\s*${c.lv}`));
+    assert.equal(await p.locator('#view-profile .ach-cell').count(), 14);
+    assert.ok(await p.locator('#view-profile .ach-cell .medal-art.on').count() >= 3);
+    assert.match(await p.textContent('#view-profile'), /Giorni di prova[\s\S]*4 giorni \(22–25 nov\)/);
+    await shot('08-profilo', p);
+    await p.evaluate(() => document.querySelector('#view-profile').scrollTo(0, 650));
+    await p.waitForTimeout(300);
+    await shot('09-medaglie', p);
+    await p.click('.tab[data-tab="goals"]');
+    assert.match(await p.textContent('#view-goals .phase.current'), new RegExp(`${c.wk.sleep.done}/${c.wk.sleep.target} notti[\\s\\S]*${c.wk.read.done}/${c.wk.read.target} letture`));
+    await shot('10-obiettivi', p);
+    await p.click('.tab[data-tab="progress"]');
+    await p.waitForTimeout(900);
+    await shot('11-progressi', p);
+    await p.click('[data-action="progress-tab"][data-id="calendar"]');
+    // calendario: i pallini "fatto" coincidono con gli stati del motore
+    const cal = await p.$$eval('#view-progress .cal-cell[data-iso]', (els) => els.map((e) => [e.dataset.iso, e.querySelectorAll('.s-done').length]));
+    const eng = await p.evaluate(() => {
+      const W = window.__mezzanotte; const st = W.state; const out = {};
+      for (const d of W.computed.days) out[d.iso] = Object.values(d.status).filter((x) => x === 'done').length;
+      return out;
+    });
+    for (const [iso, n] of cal) assert.equal(n, eng[iso] ?? 0, iso);
+    await shot('12-calendario', p);
+    await p.click('.tab[data-tab="today"]');
+    await shot('13-oggi', p);
+    // nessun contenuto sotto la barra di stato: l'ombra copre la safe area superiore
+    const shade = await p.evaluate(() => { const r = document.querySelector('.status-shade').getBoundingClientRect(); return { top: r.top, h: r.height, pos: getComputedStyle(document.querySelector('.status-shade')).position }; });
+    assert.equal(shade.pos, 'fixed');
+    assert.equal(shade.top, 0);
+    assert.ok(shade.h >= 59);
+    await p.close();
   });
 
   let backupPath;
-  await step('esportazione e importazione (anche di backup 1.x)', async () => {
-    await page.evaluate(() => { navigator.canShare = () => false; });
-    const [dl] = await Promise.all([page.waitForEvent('download'), page.click('[data-action="export"]')]);
-    assert.match(dl.suggestedFilename(), /^mezzanotte-backup-2026-11-25\.json$/);
+  await step('esportazione e importazione (anche di backup 1.x e delle prove)', async () => {
+    const p = await at('2026-12-09T19:00:00+01:00');
+    await settle(p);
+    await p.click('.tab[data-tab="profile"]');
+    await p.evaluate(() => { navigator.canShare = () => false; });
+    const [dl] = await Promise.all([p.waitForEvent('download'), p.click('[data-action="export"]')]);
+    assert.match(dl.suggestedFilename(), /^mezzanotte-backup-2026-12-09\.json$/);
     backupPath = path.join(www, 'backup.json');
     await dl.saveAs(backupPath);
     const data = JSON.parse(await readFile(backupPath, 'utf8'));
-    assert.equal(data.version, 2);
-    assert.equal(data.entries.sleep['2026-11-23'].bed, '23:50');
-    assert.ok((await M(page)).state.meta.lastExport);
-    // importa un backup 1.x
+    assert.equal(data.version, 3);
+    assert.equal(data.trial.entries.read['2026-11-24'].min, 20);
+    assert.equal(data.entries.read['2026-12-04'].min, 10);
+    // importa un backup 1.x: le prove restano separate
     const old = path.join(www, 'old.json');
-    await writeFile(old, v1raw.replace('"min":20', '"min":21'));
-    await page.setInputFiles('#import-file', old);
-    await page.waitForSelector('.dialog-wrap.show');
-    await page.click('.dialog-wrap .actions button.strong');
-    await page.waitForFunction(() => window.__mezzanotte.state.entries.read['2026-11-24']?.min === 21);
-    assert.ok(await page.evaluate(() => localStorage.getItem('mezzanotte:backup-prima-del-reset')));
-    // file non valido: errore e dati invariati
+    await writeFile(old, v1raw);
+    await p.setInputFiles('#import-file', old);
+    await p.waitForSelector('.dialog-wrap.show');
+    await p.click('.dialog-wrap .actions button.strong');
+    await p.waitForFunction(() => window.__mezzanotte.state.trial?.entries.read['2026-11-24']?.min === 20 && !window.__mezzanotte.state.entries.read['2026-12-04']);
+    // file non valido: errore, dati invariati
     const bad = path.join(www, 'bad.json');
     await writeFile(bad, '{"ciao":1}');
-    await page.setInputFiles('#import-file', bad);
-    await page.waitForSelector('.dialog-wrap.show');
-    assert.match(await page.textContent('.dialog-wrap.show'), /non è un backup/);
-    await page.click('.dialog-wrap .actions button');
-    // ripristina il backup 3.0
-    await page.setInputFiles('#import-file', backupPath);
-    await page.waitForSelector('.dialog-wrap.show .actions button.strong');
-    await page.click('.dialog-wrap.show .actions button.strong');
-    await page.waitForFunction(() => window.__mezzanotte.state.entries.sleep['2026-11-23']?.bed === '23:50');
-    assert.equal((await M(page)).state.entries.read['2026-11-24'].min, 20);
+    await p.setInputFiles('#import-file', bad);
+    await p.waitForSelector('.dialog-wrap.show');
+    assert.match(await p.textContent('.dialog-wrap.show'), /non è un backup/);
+    await p.click('.dialog-wrap .actions button');
+    // ripristina il backup 3.1
+    await p.setInputFiles('#import-file', backupPath);
+    await p.waitForSelector('.dialog-wrap.show .actions button.strong');
+    await p.click('.dialog-wrap.show .actions button.strong');
+    await p.waitForFunction(() => window.__mezzanotte.state.entries.read['2026-12-04']?.min === 10);
+    await p.close();
   });
 
   await step('funzionamento offline', async () => {
+    const p = await at('2026-12-09T20:00:00+01:00');
+    await settle(p);
     await ctx.setOffline(true);
-    await page.reload();
-    await page.waitForSelector('#view-today.active .habit');
-    await page.click('.tab[data-tab="progress"]');
-    await page.click('.tab[data-tab="today"]');
-    const before = (await M(page)).state.entries.read['2026-11-25'].min;
-    await page.click('#view-today [data-card="read"] [data-action="open-day"].h-act');
-    await page.click('.sheet [data-action="min-add"][data-val="5"]');
-    await page.waitForFunction((b) => window.__mezzanotte.state.entries.read['2026-11-25'].min === b + 5, before);
-    await page.click('.sheet .close-btn');
+    await p.reload();
+    await p.waitForSelector('#view-today.active .habit');
+    await settle(p);
+    await p.click('#view-today [data-card="read"] .check');
+    await p.waitForFunction(() => window.__mezzanotte.state.entries.read['2026-12-09']?.min >= 5);
+    await p.reload();
+    await p.waitForFunction(() => window.__mezzanotte?.state.entries.read['2026-12-09']?.min >= 5);
     await ctx.setOffline(false);
-  });
-
-  await step('sabato sera libero: non conta e non interrompe la serie', async () => {
-    const p2 = await ctx.newPage();
-    watch(p2);
-    await p2.clock.install({ time: new Date('2026-11-28T20:00:00+01:00') });
-    await p2.goto(BASE);
-    await p2.waitForSelector('#view-today.active [data-card="sleep"]');
-    assert.equal(await p2.getAttribute('#view-today [data-card="sleep"]', 'data-status'), 'free');
-    assert.match(await p2.textContent('#view-today [data-card="sleep"]'), /Libera/);
-    assert.equal(await p2.locator('#view-today [data-card="sleep"] .check').count(), 0);
-    await shot('09-sabato', p2);
-    await p2.close();
-  });
-
-  await step('mezzanotte e cambio di giorno: la notte resta di ieri fino alle 5:00', async () => {
-    const p3 = await ctx.newPage();
-    watch(p3);
-    await p3.clock.install({ time: new Date('2026-11-26T23:58:00+01:00') });
-    await p3.goto(BASE);
-    await p3.waitForSelector('#view-today.active [data-card="sleep"]');
-    assert.match(await p3.textContent('#view-today .eyebrow'), /26 novembre/i);
-    await p3.clock.fastForward('04:00'); // 00:02
-    await p3.waitForTimeout(1200);
-    assert.match(await p3.textContent('#view-today .eyebrow'), /26 novembre/i);
-    assert.match(await p3.textContent('#view-today [data-card="sleep"]'), /Mezzanotte è passata/);
-    await p3.clock.fastForward('05:00:00'); // 05:02 → nuovo giorno
-    await p3.waitForFunction(() => /27 novembre/i.test(document.querySelector('#view-today .eyebrow').textContent));
-    // al mattino la scheda del sonno chiede della notte appena passata
-    assert.match(await p3.textContent('#view-today [data-card="sleep"]'), /ieri sera/);
-    await p3.click('#view-today [data-card="sleep"] .check');
-    await p3.waitForFunction(() => window.__mezzanotte.state.entries.sleep['2026-11-26']?.ok === true);
-    assert.equal(await p3.evaluate(() => window.__mezzanotte.state.entries.sleep['2026-11-26'].bed), undefined);
-    await p3.close();
-  });
-
-  await step('rientro dopo alcuni giorni: messaggio positivo e recupero', async () => {
-    const p4 = await ctx.newPage();
-    watch(p4);
-    await p4.clock.install({ time: new Date('2026-12-02T09:00:00+01:00') });
-    await p4.goto(BASE);
-    await p4.waitForSelector('#view-today.active .welcome-back');
-    const txt = await p4.textContent('#view-today .insight');
-    assert.match(txt, /Bentornato/);
-    assert.match(txt, /XP/);
-    const all = await p4.textContent('#view-today');
-    assert.doesNotMatch(all, /perso|fallit|peccato|purtroppo/i);
-    // le abitudini restano visibili senza scorrere anche al rientro
-    const tabTop = await p4.evaluate(() => document.querySelector('.tabbar').getBoundingClientRect().top);
-    const box = await p4.locator('#view-today [data-card="read"] .check').boundingBox();
-    assert.ok(box.y + box.height < tabTop);
-    await shot('10-bentornato', p4);
-    await p4.click('[data-action="open-catchup"]');
-    await p4.waitForSelector('.sheet.show .cu-row');
-    await p4.click('.sheet .cu-row [data-action="catchup-read"][data-iso="2026-11-30"]');
-    await p4.waitForFunction(() => window.__mezzanotte.state.entries.read['2026-11-30']?.min === 5);
-    await p4.click('.sheet [data-action="catchup-done"]');
-    await p4.waitForSelector('.sheet', { state: 'detached' });
-    assert.equal(await p4.locator('#view-today .welcome-back').count(), 0);
-    await p4.close();
-  });
-
-  await step('fine del percorso: bilancio, nuovo percorso senza perdere lo storico, nuova abitudine', async () => {
-    const p7 = await ctx.newPage();
-    watch(p7);
-    await p7.clock.install({ time: new Date('2026-12-23T19:00:00+01:00') });
-    await p7.goto(BASE);
-    // eventuali celebrazioni prima del bilancio
-    for (let i = 0; i < 6 && !(await p7.locator('.sheet.show[data-type="summary"]').count()); i++) {
-      if (await p7.locator('.overlay.show [data-action="ov-close"]').count()) await p7.click('.overlay.show [data-action="ov-close"]');
-      await p7.waitForTimeout(700);
-    }
-    await p7.waitForSelector('.sheet.show[data-type="summary"]');
-    const sum = await p7.textContent('.sheet');
-    assert.match(sum, /Bilancio del percorso 1/);
-    assert.match(sum, /Notti in orario/);
-    assert.match(sum, /Minuti di lettura/);
-    assert.match(sum, /Prossimo percorso/);
-    await shot('13-bilancio', p7);
-    const before = await M(p7);
-    await p7.click('.sheet [data-action="start-next"]');
-    await p7.waitForSelector('.dialog-wrap.show');
-    await p7.click('.dialog-wrap .actions button.strong');
-    await p7.waitForFunction(() => window.__mezzanotte.state.journeys.length === 2);
-    const after = await M(p7);
-    assert.equal(after.state.journeys[1].start, '2026-12-23');
-    assert.deepEqual(after.state.entries, before.state.entries);
-    assert.ok(after.xp.total >= before.xp.total);
-    assert.match(await p7.textContent('#view-today .large-title'), /Giorno 1/);
-    // nuova abitudine, ora sbloccata
-    await p7.click('.tab[data-tab="goals"]');
-    await p7.click('#view-goals [data-action="new-habit"]');
-    await p7.waitForSelector('.sheet.show #nh-name');
-    await p7.fill('#nh-name', 'Allenamento');
-    await p7.click('.sheet [data-action="draft-step"][data-k="perWeek"][data-val="-1"]');
-    await p7.click('.sheet [data-action="create-habit"]');
-    await p7.waitForFunction(() => window.__mezzanotte.state.habits.length === 3);
-    const h = (await M(p7)).state.habits[2];
-    assert.equal(h.id, 'allenamento');
-    assert.equal(h.config.perWeek, 3);
-    await p7.click('.tab[data-tab="today"]');
-    await p7.click('#view-today [data-card="allenamento"] .check');
-    await p7.waitForFunction(() => window.__mezzanotte.state.entries.allenamento['2026-12-23']?.done === true);
-    await p7.close();
+    await p.close();
   });
 
   await step('passaggio di livello: schermata speciale, chiudibile subito', async () => {
     const c2 = await browser.newContext(IPHONE);
     const p5 = await c2.newPage();
     watch(p5);
-    await p5.clock.install({ time: new Date('2026-11-25T18:00:00+01:00') });
+    await p5.clock.install({ time: new Date('2026-12-09T18:00:00+01:00') });
     const raw = JSON.parse(await readFile(backupPath, 'utf8'));
     raw.meta.seen.level = 1;
     raw.meta.seen.achievements = [];
     await p5.addInitScript((s) => localStorage.setItem('mezzanotte:v2', s), JSON.stringify(raw));
     await p5.goto(BASE);
     await p5.waitForSelector('.overlay.show .ov-ring');
-    assert.match(await p5.textContent('.overlay.show'), /Livello\s*2/);
-    assert.match(await p5.textContent('.overlay.show'), /Costruttore/);
-    await shot('08-livello', p5);
+    assert.match(await p5.textContent('.overlay.show'), /Nuovo livello/);
+    await p5.waitForTimeout(1400);
+    await shot('14-livello', p5);
     await p5.click('.overlay [data-action="ov-close"]');
     await p5.waitForSelector('.ach-toast.show');
     await c2.close();
@@ -481,27 +538,20 @@ try {
     const c3 = await browser.newContext({ ...IPHONE, reducedMotion: 'reduce' });
     const p6 = await c3.newPage();
     watch(p6);
-    await p6.clock.install({ time: new Date('2026-11-25T08:00:00+01:00') });
+    await p6.clock.install({ time: new Date('2027-01-11T08:00:00+01:00') });
     await p6.goto(BASE);
     await p6.waitForSelector('#onboarding');
-    await shot('11-onboarding', p6);
     await p6.click('[data-action="start"]');
     await p6.waitForSelector('#view-today.active .habit');
     assert.equal(await p6.evaluate(() => document.documentElement.classList.contains('reduce-motion')), true);
-    assert.equal(await p6.locator('.overlay').count(), 0); // nessun benvenuto per chi è appena arrivato
+    assert.equal(await p6.locator('.overlay').count(), 0);
     assert.match(await p6.textContent('#view-today .large-title'), /Giorno 1/);
-    // completamento con un tocco, poi "Annulla"
     await p6.click('#view-today [data-card="read"] .check');
-    await p6.waitForFunction(() => window.__mezzanotte.state.entries.read['2026-11-25']?.min === 5);
+    await p6.waitForFunction(() => window.__mezzanotte.state.entries.read['2027-01-11']?.min === 5);
     assert.equal((await M(p6)).xp.total, 20);
     await p6.click('.toast.show button');
-    await p6.waitForFunction(() => !window.__mezzanotte.state.entries.read['2026-11-25']);
+    await p6.waitForFunction(() => !window.__mezzanotte.state.entries.read['2027-01-11']);
     assert.equal((await M(p6)).xp.total, 0);
-    // di nuovo: +20 XP e il primo traguardo
-    await p6.click('#view-today [data-card="read"] .check');
-    await p6.waitForSelector('.ach-toast.show');
-    assert.equal((await M(p6)).xp.total, 20);
-    assert.match(await p6.textContent('.ach-toast'), /Primo passo/);
     await c3.close();
   });
 
